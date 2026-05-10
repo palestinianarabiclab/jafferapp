@@ -1,6 +1,13 @@
 const appConfig = window.__APP_CONFIG__ || {};
+const firebaseConfig = appConfig.firebase || {};
+const hasFirebaseConfig = Boolean(
+    firebaseConfig.apiKey &&
+    firebaseConfig.authDomain &&
+    firebaseConfig.projectId &&
+    firebaseConfig.appId
+);
 
-window.firebaseConfig = appConfig.firebase || null;
+window.firebaseConfig = hasFirebaseConfig ? firebaseConfig : null;
 window.googleCalendarConfig = {
     clientId: appConfig.googleCalendar?.clientId || "",
     apiKey: appConfig.googleCalendar?.apiKey || "",

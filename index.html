@@ -6,7 +6,7 @@
     <title>Lesson Booking Studio</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self' 'unsafe-inline' https://www.google.com https://www.gstatic.com https://apis.google.com https://accounts.google.com https://cdn.jsdelivr.net; script-src-elem 'self' 'unsafe-inline' https://www.google.com https://www.gstatic.com https://apis.google.com https://accounts.google.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data: https:; connect-src 'self' https://www.google.com https://firestore.googleapis.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com https://www.googleapis.com https://apis.google.com https://www.gstatic.com https://cdn.jsdelivr.net https://content.googleapis.com https://script.google.com https://script.googleusercontent.com https://api.emailjs.com; frame-src https://www.google.com https://www.gstatic.com https://content.googleapis.com https://jafferapp.firebaseapp.com; child-src https://www.google.com https://www.gstatic.com https://content.googleapis.com https://jafferapp.firebaseapp.com; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests" />
+        content="default-src 'self'; script-src 'self' 'unsafe-inline' https://www.google.com https://www.gstatic.com https://apis.google.com https://accounts.google.com https://cdn.jsdelivr.net; script-src-elem 'self' 'unsafe-inline' https://www.google.com https://www.gstatic.com https://apis.google.com https://accounts.google.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data: https:; connect-src 'self' https://www.google.com https://firestore.googleapis.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com https://www.googleapis.com https://apis.google.com https://www.gstatic.com https://cdn.jsdelivr.net https://content.googleapis.com https://script.google.com https://script.googleusercontent.com https://api.emailjs.com; frame-src https://www.google.com https://www.gstatic.com https://content.googleapis.com https://*.firebaseapp.com https://*.web.app; child-src https://www.google.com https://www.gstatic.com https://content.googleapis.com https://*.firebaseapp.com https://*.web.app; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests" />
     <link rel="stylesheet" href="styles.css" />
     <link rel="icon"
         href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230f172a'/%3E%3Ctext x='32' y='41' font-size='26' text-anchor='middle' fill='%23f8fafc' font-family='Arial, sans-serif'%3ELS%3C/text%3E%3C/svg%3E" />
@@ -83,6 +83,11 @@
                                 <h3>Confirm Booking</h3>
                                 <p class="small-note" id="bookingAccountSummary">Sign in, choose a time, then confirm your lesson.</p>
                             </div>
+                        </div>
+                        <div class="student-balance" id="studentBalanceCard" hidden>
+                            <span class="student-balance__label">Your balance</span>
+                            <strong id="studentBalanceValue">--</strong>
+                            <span id="studentLessonPriceValue">Lesson price: --</span>
                         </div>
 
                         <form id="bookingForm" class="form-stack">
@@ -284,6 +289,23 @@
                         <button id="savePreplyBtn" type="button" class="btn btn--outline">Save Preply Calendar ID</button>
                         <button id="googleTestPreplyBtn" type="button" class="btn btn--ghost">Test Preply Calendar</button>
                     </div>
+                </section>
+
+                <section class="teacher-editor__section">
+                    <div class="panel__head">
+                        <div>
+                            <h4>Students & Balances</h4>
+                            <p class="teacher-edit-note">
+                                Open a student to set their balance and lesson price. Past lessons and late cancellations are deducted once.
+                            </p>
+                        </div>
+                        <div class="action-row action-row--wrap">
+                            <button id="refreshStudentsBtn" type="button" class="btn btn--outline btn--small">Refresh</button>
+                            <button id="reconcileBalancesBtn" type="button" class="btn btn--ghost btn--small">Deduct Due Lessons</button>
+                        </div>
+                    </div>
+                    <p id="teacherStudentsMsg" class="status-line"></p>
+                    <div id="teacherStudentsList" class="student-admin-list"></div>
                 </section>
 
                 <section class="teacher-editor__section">

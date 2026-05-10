@@ -92,6 +92,31 @@ npx serve
 
 Then open the local URL in the browser.
 
+## Deploy on Vercel
+
+Vercel builds this as a static site. Add these Environment Variables in the Vercel project settings, then redeploy:
+
+- `FIREBASE_API_KEY`
+- `FIREBASE_AUTH_DOMAIN`
+- `FIREBASE_PROJECT_ID`
+- `FIREBASE_STORAGE_BUCKET`
+- `FIREBASE_MESSAGING_SENDER_ID`
+- `FIREBASE_APP_ID`
+- `FIREBASE_MEASUREMENT_ID` optional
+- `GOOGLE_CALENDAR_CLIENT_ID` optional, for teacher Google Calendar sync
+- `GOOGLE_CALENDAR_API_KEY` optional, for teacher Google Calendar sync
+- `GOOGLE_CALENDAR_REDIRECT_URI` optional. Use your Vercel URL with a trailing slash, for example `https://your-site.vercel.app/`.
+- `EMAILJS_PUBLIC_KEY` optional
+- `EMAILJS_SERVICE_ID` optional
+- `EMAILJS_TEMPLATE_ID` optional
+
+During deployment, `vercel.json` runs `node scripts/generate-runtime-config.js`, which creates `js/config.runtime.js` from those variables.
+
+Also add your Vercel domain to:
+
+- Firebase Authentication > Settings > Authorized domains
+- Google Cloud OAuth Client > Authorized JavaScript origins and redirect URIs, if Google Calendar sync is enabled
+
 ## Notes
 
 - The app starts on the student booking screen.

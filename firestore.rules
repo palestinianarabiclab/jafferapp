@@ -46,7 +46,7 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow read: if ownsDoc(uid);
+      allow read: if ownsDoc(uid) || isTeacher();
       allow create: if ownsDoc(uid) &&
         request.resource.data.keys().hasOnly([
           'email',
@@ -61,14 +61,21 @@ service cloud.firestore {
         isValidPhone(request.resource.data.phone) &&
         request.resource.data.name is string &&
         request.resource.data.name.size() > 1;
-      allow update: if ownsDoc(uid) &&
+      allow update: if (ownsDoc(uid) &&
         resource.data.role == "student" &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'email',
           'name',
           'phone',
           'updatedAt'
-        ]);
+        ])) || (isTeacher() &&
+        resource.data.role == "student" &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'balance',
+          'lessonPrice',
+          'financeUpdatedAt',
+          'updatedAt'
+        ]));
       allow delete: if false;
     }
 
@@ -149,7 +156,6 @@ service cloud.firestore {
       ) || (
         signedIn() &&
           resource.data.studentUid == request.auth.uid &&
-          resource.data.slot > request.time.toMillis() + 12 * 60 * 60 * 1000 &&
           request.resource.data.studentUid == resource.data.studentUid &&
           request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'slot',
@@ -159,7 +165,13 @@ service cloud.firestore {
             'rescheduledFrom',
             'rescheduledAt'
           ]) &&
-          request.resource.data.status in ["canceled", "rescheduled"]
+          (
+            request.resource.data.status == "canceled" ||
+            (
+              request.resource.data.status == "rescheduled" &&
+              resource.data.slot > request.time.toMillis() + 12 * 60 * 60 * 1000
+            )
+          )
       );
 
       allow delete: if isTeacher();
@@ -214,11 +226,15 @@ service cloud.firestore {
             'history',
             'canceledAt',
             'rescheduledFrom',
-            'rescheduledAt'
+            'rescheduledAt',
+            'balanceChargedAt',
+            'chargedAmount',
+            'chargeReason'
           ]) &&
           isSafeStatus(request.resource.data.status)
       ) || (
-        canStudentChangeBooking() &&
+        signedIn() &&
+          resource.data.studentUid == request.auth.uid &&
           request.resource.data.studentUid == resource.data.studentUid &&
           request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'slot',
@@ -231,7 +247,13 @@ service cloud.firestore {
             'rescheduledFrom',
             'rescheduledAt'
           ]) &&
-          request.resource.data.status in ["canceled", "rescheduled"]
+          (
+            request.resource.data.status == "canceled" ||
+            (
+              request.resource.data.status == "rescheduled" &&
+              resource.data.slot > request.time.toMillis() + 12 * 60 * 60 * 1000
+            )
+          )
       );
 
       allow delete: if isTeacher();

@@ -637,6 +637,31 @@ main.site-shell {
     font-size: 1.25rem;
 }
 
+.student-balance {
+    display: grid;
+    gap: 4px;
+    margin-bottom: 14px;
+    padding: 14px 16px;
+    border: 1px solid rgba(15, 118, 110, 0.16);
+    border-radius: 16px;
+    background: rgba(15, 118, 110, 0.08);
+    color: var(--primary-dark);
+}
+
+.student-balance[hidden] {
+    display: none;
+}
+
+.student-balance__label,
+.student-balance span:last-child {
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+.student-balance strong {
+    font-size: 1.6rem;
+}
+
 .contact-card {
     border: 1px solid rgba(91, 100, 113, 0.14);
     border-radius: 22px;
@@ -656,7 +681,8 @@ main.site-shell {
 
 .booking-status-item,
 .exception-item,
-.booking-item {
+.booking-item,
+.student-admin-item {
     border: 1px solid rgba(91, 100, 113, 0.16);
     border-radius: 18px;
     padding: 16px;
@@ -704,6 +730,49 @@ main.site-shell {
 .booking-item__status--rescheduled {
     background: rgba(194, 65, 12, 0.12);
     color: var(--accent);
+}
+
+.student-admin-list {
+    display: grid;
+    gap: 12px;
+}
+
+.student-admin-item {
+    display: grid;
+    gap: 12px;
+}
+
+.student-admin-item__summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+}
+
+.student-admin-item__summary strong,
+.student-admin-item__summary span span {
+    display: block;
+}
+
+.student-admin-item__summary span span {
+    color: var(--muted);
+    font-size: 0.92rem;
+}
+
+.student-admin-item__money {
+    flex: 0 0 auto;
+    color: var(--primary-dark);
+    font-weight: 700;
+}
+
+.student-admin-editor[hidden] {
+    display: none;
 }
 
 .dashboard[hidden] {
@@ -987,6 +1056,11 @@ main.site-shell {
 
     .student-session-bar {
         align-items: stretch;
+        flex-direction: column;
+    }
+
+    .student-admin-item__summary {
+        align-items: flex-start;
         flex-direction: column;
     }
 

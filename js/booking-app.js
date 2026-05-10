@@ -54,6 +54,7 @@ const state = {
     teacherUser: null,
     teacherRole: "",
     bookingCache: new Map(),
+    studentCache: new Map(),
     googleCalendarMessage: "",
     busyRefreshTimer: null,
     busyRefreshInFlight: null,
@@ -86,6 +87,9 @@ function cacheDom() {
         "selectedTimeDisplay",
         "bookingForm",
         "bookingAccountSummary",
+        "studentBalanceCard",
+        "studentBalanceValue",
+        "studentLessonPriceValue",
         "bookingWebsite",
         "bookingSubmit",
         "bookingMsg",
@@ -156,6 +160,10 @@ function cacheDom() {
         "clearExceptionsBtn",
         "teacherBookingMsg",
         "teacherBookingList",
+        "teacherStudentsMsg",
+        "teacherStudentsList",
+        "refreshStudentsBtn",
+        "reconcileBalancesBtn",
         "refreshBookingsBtn",
         "clearBookingsBtn",
         "googleCalendarStatus",
@@ -400,6 +408,41 @@ function getStudentPhone() {
     return (state.studentProfile?.phone || "").trim();
 }
 
+function toMoneyValue(value) {
+    const number = Number(value || 0);
+    return Number.isFinite(number) ? number : 0;
+}
+
+function formatMoney(value) {
+    return toMoneyValue(value).toLocaleString([], {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
+    });
+}
+
+function getStudentBalance() {
+    return toMoneyValue(state.studentProfile?.balance);
+}
+
+function getStudentLessonPrice() {
+    return toMoneyValue(state.studentProfile?.lessonPrice);
+}
+
+function updateStudentBalanceUi() {
+    const signedIn = isStudentSignedIn();
+    if (els.studentBalanceCard) {
+        els.studentBalanceCard.hidden = !signedIn;
+    }
+    if (!signedIn) return;
+    if (els.studentBalanceValue) {
+        els.studentBalanceValue.textContent = formatMoney(getStudentBalance());
+    }
+    if (els.studentLessonPriceValue) {
+        const price = getStudentLessonPrice();
+        els.studentLessonPriceValue.textContent = price ? `Lesson price: ${formatMoney(price)}` : "Lesson price: not set";
+    }
+}
+
 function updateBookingSubmitState() {
     if (!els.bookingSubmit) return;
     els.bookingSubmit.disabled = !state.selectedSlotMs || !isStudentSignedIn();
@@ -450,6 +493,7 @@ function updateStudentAuthUi() {
     if (els.studentLogoutBtn) {
         els.studentLogoutBtn.hidden = !signedIn;
     }
+    updateStudentBalanceUi();
     updateBookingSubmitState();
 }
 
@@ -793,9 +837,11 @@ async function loadStudentBookings() {
         els.bookingStatusList.innerHTML = rows.slice(0, 10).map((b) => {
             const status = (b.status || "booked").toLowerCase();
             const label = status === "canceled" ? "Canceled" : status === "rescheduled" ? "Rescheduled" : "Booked";
-            const canChange = status !== "canceled" && Number(b.slot || 0) - Date.now() >= STUDENT_CHANGE_CUTOFF_MS;
-            const cutoffNote = status !== "canceled" && !canChange
-                ? "<div class=\"small-note\">Changes close 12 hours before the lesson.</div>"
+            const canCancel = status !== "canceled";
+            const canReschedule = status !== "canceled" && Number(b.slot || 0) - Date.now() >= STUDENT_CHANGE_CUTOFF_MS;
+            const isLateWindow = status !== "canceled" && Number(b.slot || 0) - Date.now() < STUDENT_CHANGE_CUTOFF_MS;
+            const cutoffNote = isLateWindow
+                ? "<div class=\"small-note\">Rescheduling closes 12 hours before the lesson. Late cancellation may still charge the lesson price.</div>"
                 : "";
             return `
                 <div class="booking-status-item" data-student-booking-id="${escapeHtml(b.id)}">
@@ -803,8 +849,8 @@ async function loadStudentBookings() {
                     <div>Status: ${escapeHtml(label)}</div>
                     ${cutoffNote}
                     <div class="booking-item__actions">
-                        <button class="btn btn--ghost btn--small" data-student-action="cancel" ${canChange ? "" : "disabled"}>Cancel</button>
-                        <button class="btn btn--outline btn--small" data-student-action="reschedule" ${canChange ? "" : "disabled"}>Reschedule</button>
+                        <button class="btn btn--ghost btn--small" data-student-action="cancel" ${canCancel ? "" : "disabled"}>Cancel</button>
+                        <button class="btn btn--outline btn--small" data-student-action="reschedule" ${canReschedule ? "" : "disabled"}>Reschedule</button>
                     </div>
                     <div class="booking-item__resched"></div>
                 </div>
@@ -820,9 +866,7 @@ async function cancelStudentBooking(bookingId) {
     const snap = await window.db.collection("bookings").doc(bookingId).get();
     const booking = snap.data() || {};
     if (booking.studentUid !== state.currentUser?.uid) throw new Error("This booking does not belong to your account.");
-    if (Number(booking.slot || 0) - Date.now() < STUDENT_CHANGE_CUTOFF_MS) {
-        throw new Error("You cannot cancel less than 12 hours before the lesson.");
-    }
+    const isLateCancel = Number(booking.slot || 0) - Date.now() < STUDENT_CHANGE_CUTOFF_MS;
     if ((booking.googleCalendarEventId || bookingId) && typeof window.deleteBookingViaAppsScript === "function") {
         const result = await window.deleteBookingViaAppsScript({
             eventId: booking.googleCalendarEventId,
@@ -850,6 +894,7 @@ async function cancelStudentBooking(bookingId) {
             at: Date.now(),
             action: "canceled",
             by: "student",
+            lateChargeApplies: isLateCancel,
         }),
     }, { merge: true });
     await window.db.collection("publicBookings").doc(bookingId).set({
@@ -1366,6 +1411,11 @@ async function refreshTeacherDashboard() {
     window.bookingSettings = state.bookingSettings;
     await refreshRuntimeBusyBlocks();
     syncTeacherFormFields();
+    const chargedCount = await reconcileStudentBalances();
+    if (chargedCount && els.teacherStudentsMsg) {
+        setStatus(els.teacherStudentsMsg, `Deducted ${chargedCount} due lesson charge${chargedCount === 1 ? "" : "s"}.`, "success");
+    }
+    await refreshTeacherStudents();
     await refreshTeacherBookings();
     await refreshGoogleCalendarStatus();
     await renderBookingCalendar();
@@ -1379,6 +1429,124 @@ async function refreshTeacherBookings() {
         escapeHtml,
         formatSlotTime,
     });
+}
+
+async function refreshTeacherStudents() {
+    if (!els.teacherStudentsList) return;
+    els.teacherStudentsList.innerHTML = "<div class=\"small-note\">Loading students...</div>";
+    state.studentCache.clear();
+    try {
+        const snap = await window.db.collection("users").where("role", "==", "student").get();
+        const students = [];
+        snap.forEach((doc) => students.push({ id: doc.id, ...(doc.data() || {}) }));
+        students.sort((a, b) => String(a.name || a.email || "").localeCompare(String(b.name || b.email || "")));
+        if (!students.length) {
+            els.teacherStudentsList.innerHTML = "<div class=\"small-note\">No students yet.</div>";
+            return;
+        }
+        els.teacherStudentsList.innerHTML = students.map((student) => {
+            state.studentCache.set(student.id, student);
+            const balance = formatMoney(student.balance);
+            const lessonPrice = toMoneyValue(student.lessonPrice);
+            return `
+                <div class="student-admin-item" data-student-id="${escapeHtml(student.id)}">
+                    <button class="student-admin-item__summary" type="button" data-student-action="toggle">
+                        <span>
+                            <strong>${escapeHtml(student.name || "Student")}</strong>
+                            <span>${escapeHtml(student.email || "")}</span>
+                        </span>
+                        <span class="student-admin-item__money">Balance: ${balance}</span>
+                    </button>
+                    <form class="student-admin-editor" data-student-editor hidden>
+                        <div class="inline-fields">
+                            <label class="field">
+                                <span>Balance</span>
+                                <input data-student-balance type="number" step="0.01" value="${escapeHtml(toMoneyValue(student.balance))}" />
+                            </label>
+                            <label class="field">
+                                <span>Lesson Price</span>
+                                <input data-student-price type="number" min="0" step="0.01" value="${escapeHtml(lessonPrice)}" />
+                            </label>
+                            <label class="field">
+                                <span>Phone</span>
+                                <input value="${escapeHtml(student.phone || "")}" disabled />
+                            </label>
+                        </div>
+                        <div class="action-row">
+                            <button class="btn btn--primary btn--small" type="submit" data-student-action="save">Save Student</button>
+                        </div>
+                    </form>
+                </div>
+            `;
+        }).join("");
+    } catch (error) {
+        console.error("Could not load students.", error);
+        els.teacherStudentsList.innerHTML = "<div class=\"small-note\">Unable to load students.</div>";
+    }
+}
+
+async function saveStudentFinance(studentId, balance, lessonPrice) {
+    await window.db.collection("users").doc(studentId).set({
+        balance: toMoneyValue(balance),
+        lessonPrice: toMoneyValue(lessonPrice),
+        financeUpdatedAt: Date.now(),
+        updatedAt: window.firebase.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+}
+
+async function reconcileStudentBalances() {
+    const now = Date.now();
+    const snap = await window.db
+        .collection("bookings")
+        .limit(400)
+        .get();
+    let chargedCount = 0;
+    const studentDocs = new Map();
+    for (const doc of snap.docs) {
+        const booking = doc.data() || {};
+        const status = String(booking.status || "booked").toLowerCase();
+        if (!booking.studentUid || booking.balanceChargedAt) continue;
+        const shouldChargeAttended = Number(booking.slot || 0) <= now && (status === "booked" || status === "rescheduled");
+        const canceledAt = Number(booking.canceledAt || 0);
+        const lateCanceled = status === "canceled" && canceledAt && Number(booking.slot || 0) - canceledAt < STUDENT_CHANGE_CUTOFF_MS;
+        if (!shouldChargeAttended && !lateCanceled) continue;
+
+        let studentSnap = studentDocs.get(booking.studentUid);
+        if (!studentSnap) {
+            studentSnap = await window.db.collection("users").doc(booking.studentUid).get();
+            studentDocs.set(booking.studentUid, studentSnap);
+        }
+        const student = studentSnap.exists ? (studentSnap.data() || {}) : {};
+        const lessonPrice = toMoneyValue(booking.lessonPrice || student.lessonPrice);
+        if (!lessonPrice) continue;
+        const chargeReason = lateCanceled ? "late-cancel" : "lesson";
+        const batch = window.db.batch();
+        batch.set(window.db.collection("users").doc(booking.studentUid), {
+            balance: toMoneyValue(student.balance) - lessonPrice,
+            financeUpdatedAt: now,
+            updatedAt: window.firebase.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        batch.set(window.db.collection("bookings").doc(doc.id), {
+            balanceChargedAt: now,
+            chargedAmount: lessonPrice,
+            chargeReason,
+            updatedAt: now,
+            history: window.firebase.firestore.FieldValue.arrayUnion({
+                at: now,
+                action: "balance-charged",
+                by: "teacher",
+                amount: lessonPrice,
+                reason: chargeReason,
+            }),
+        }, { merge: true });
+        await batch.commit();
+        studentDocs.set(booking.studentUid, {
+            exists: true,
+            data: () => ({ ...student, balance: toMoneyValue(student.balance) - lessonPrice }),
+        });
+        chargedCount += 1;
+    }
+    return chargedCount;
 }
 
 function updateEmailQuotaUi(result) {
@@ -1598,6 +1766,55 @@ function wireTeacherActions() {
 
     els.refreshBookingsBtn?.addEventListener("click", (event) => {
         withButtonLoading(event.currentTarget, "Refreshing...", () => refreshTeacherBookings()).catch(console.error);
+    });
+
+    els.refreshStudentsBtn?.addEventListener("click", (event) => {
+        withButtonLoading(event.currentTarget, "Refreshing...", () => refreshTeacherStudents()).catch((error) => {
+            setStatus(els.teacherStudentsMsg, error.message || "Could not refresh students.", "error");
+        });
+    });
+
+    els.reconcileBalancesBtn?.addEventListener("click", (event) => {
+        withButtonLoading(event.currentTarget, "Deducting...", async () => {
+            const chargedCount = await reconcileStudentBalances();
+            await refreshTeacherStudents();
+            setStatus(els.teacherStudentsMsg, chargedCount
+                ? `Deducted ${chargedCount} due lesson charge${chargedCount === 1 ? "" : "s"}.`
+                : "No due lessons to deduct.", chargedCount ? "success" : "");
+        }).catch((error) => {
+            setStatus(els.teacherStudentsMsg, error.message || "Could not deduct balances.", "error");
+        });
+    });
+
+    els.teacherStudentsList?.addEventListener("click", (event) => {
+        const toggle = event.target.closest("[data-student-action='toggle']");
+        if (!toggle) return;
+        const item = toggle.closest("[data-student-id]");
+        const editor = item?.querySelector("[data-student-editor]");
+        if (editor) editor.hidden = !editor.hidden;
+    });
+
+    els.teacherStudentsList?.addEventListener("submit", async (event) => {
+        const form = event.target.closest("[data-student-editor]");
+        if (!form) return;
+        event.preventDefault();
+        const item = form.closest("[data-student-id]");
+        const studentId = item?.dataset.studentId || "";
+        if (!studentId) return;
+        const submitter = event.submitter;
+        try {
+            await withButtonLoading(submitter, "Saving...", async () => {
+                await saveStudentFinance(
+                    studentId,
+                    form.querySelector("[data-student-balance]")?.value,
+                    form.querySelector("[data-student-price]")?.value
+                );
+                await refreshTeacherStudents();
+            });
+            setStatus(els.teacherStudentsMsg, "Student balance saved.", "success");
+        } catch (error) {
+            setStatus(els.teacherStudentsMsg, error.message || "Could not save student balance.", "error");
+        }
     });
 
     els.clearBookingsBtn?.addEventListener("click", async () => {
