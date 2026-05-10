@@ -10,7 +10,7 @@ window.__APP_CONFIG__ = {
     },
     googleCalendar: {
         clientId: "728875114917-im3ui9lcb471mc43h11bgoq5fbr9kvu2.apps.googleusercontent.com",
-        apiKey: "AIzaSyCVff8yPsjylbM5Fhwl2HnqLyIpQhlbneE",
+        apiKey: "AIzaSyB6yy0l267FTMVc2tp8t_97L7PSin7Wx7A",
         discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest"],
         scopes: "https://www.googleapis.com/auth/calendar.events",
         redirectUri: window.location.origin + "/",
