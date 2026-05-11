@@ -146,6 +146,8 @@ function cacheDom() {
         "appsScriptTestBtn",
         "appsScriptRefreshBusyBtn",
         "appsScriptQuotaBtn",
+        "appsScriptInstallReminderBtn",
+        "appsScriptReminderCheckBtn",
         "appsScriptEmailQuota",
         "appsScriptEmailQuotaValue",
         "exceptionForm",
@@ -1723,6 +1725,20 @@ function wireTeacherActions() {
         withButtonLoading(event.currentTarget, "Refreshing...", () => refreshAppsScriptEmailQuota({ silent: false })).catch((error) => {
             setStatus(els.appsScriptMsg, error.message || "Could not load email quota.", "error");
         });
+    });
+
+    els.appsScriptInstallReminderBtn?.addEventListener("click", async (event) => {
+        const result = await withButtonLoading(event.currentTarget, "Installing...", () => window.installLessonReminderTrigger?.());
+        setStatus(els.appsScriptMsg, result?.message || "Reminder trigger setup finished.", result?.success ? "success" : "error");
+    });
+
+    els.appsScriptReminderCheckBtn?.addEventListener("click", async (event) => {
+        const result = await withButtonLoading(event.currentTarget, "Checking...", () => window.sendLessonReminderCheck?.());
+        const count = Number(result?.sentCount || 0);
+        const message = result?.message
+            ? `${result.message} Sent ${count} reminder${count === 1 ? "" : "s"}.`
+            : `Sent ${count} reminder${count === 1 ? "" : "s"}.`;
+        setStatus(els.appsScriptMsg, message, result?.success ? "success" : "error");
     });
 
     els.exceptionForm?.addEventListener("submit", async (event) => {

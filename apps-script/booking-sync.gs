@@ -98,12 +98,131 @@ function sendStudentConfirmationEmail_(recipient, details) {
   return sendPlainEmail_(recipient, subject, body);
 }
 
+function sendLessonReminderEmail_(recipient, details) {
+  const subject = 'Reminder: your lesson starts in 15 minutes';
+  const body = [
+    'Hello ' + (details.name || 'Student') + ',',
+    '',
+    'This is a quick reminder that your lesson starts in about 15 minutes.',
+    '',
+    'Date & time: ' + (details.slotLabel || ''),
+    'Teacher timezone: ' + (details.timeZone || ''),
+    'Booking ID: ' + (details.bookingId || ''),
+    '',
+    'Please be ready a few minutes early.',
+    '',
+    'See you soon.'
+  ].join('\n');
+  return sendPlainEmail_(recipient, subject, body);
+}
+
 function normalizeCalendarId_(value) {
   const raw = (value || '').trim();
   if (!raw) return '';
   if (raw.indexOf('calendar.google.com') === -1) return raw;
   const srcMatch = raw.match(/[?&]src=([^&]+)/i);
   return srcMatch && srcMatch[1] ? decodeURIComponent(srcMatch[1]) : raw;
+}
+
+function parseEventDetails_(event, config) {
+  const description = event.getDescription() || '';
+  function pick(label) {
+    const match = description.match(new RegExp('^' + label + ':\\s*(.*)$', 'mi'));
+    return match && match[1] ? match[1].trim() : '';
+  }
+  return {
+    bookingId: pick('Booking ID'),
+    name: pick('Student') || event.getTitle().replace(/^Lesson with\s+/i, ''),
+    email: pick('Email'),
+    phone: pick('Phone'),
+    timeZone: pick('Timezone') || config.defaultTimeZone,
+    slotLabel: Utilities.formatDate(event.getStartTime(), pick('Timezone') || config.defaultTimeZone, 'yyyy-MM-dd HH:mm'),
+  };
+}
+
+function getReminderKey_(event, details) {
+  return 'lesson_reminder_15_' + (details.bookingId || event.getId());
+}
+
+function sendUpcomingLessonReminders() {
+  const config = getConfig_();
+  const cal = CalendarApp.getCalendarById(config.primaryCalendarId);
+  if (!cal) {
+    return { success: false, message: 'Primary calendar not found.', sentCount: 0 };
+  }
+
+  const now = new Date();
+  const start = new Date(now.getTime() + 5 * 60 * 1000);
+  const end = new Date(now.getTime() + 20 * 60 * 1000);
+  const events = cal.getEvents(start, end).filter(function (event) {
+    return (event.getDescription() || '').indexOf('Booking ID:') !== -1;
+  });
+  const props = PropertiesService.getScriptProperties();
+  let sentCount = 0;
+  let skippedCount = 0;
+  let failedCount = 0;
+
+  events.forEach(function (event) {
+    const details = parseEventDetails_(event, config);
+    const key = getReminderKey_(event, details);
+    if (props.getProperty(key)) {
+      skippedCount += 1;
+      return;
+    }
+    if (!isValidEmail_(details.email)) {
+      failedCount += 1;
+      return;
+    }
+    try {
+      const sent = sendLessonReminderEmail_(details.email, details);
+      if (sent) {
+        props.setProperty(key, String(Date.now()));
+        sentCount += 1;
+      } else {
+        failedCount += 1;
+      }
+    } catch (err) {
+      failedCount += 1;
+    }
+  });
+
+  return {
+    success: failedCount === 0,
+    message: 'Reminder check finished.',
+    sentCount: sentCount,
+    skippedCount: skippedCount,
+    failedCount: failedCount,
+    checkedCount: events.length,
+    windowStart: start.getTime(),
+    windowEnd: end.getTime(),
+  };
+}
+
+function installLessonReminderTrigger() {
+  const handler = 'sendUpcomingLessonReminders';
+  const existing = ScriptApp.getProjectTriggers().filter(function (trigger) {
+    return trigger.getHandlerFunction() === handler;
+  });
+  if (!existing.length) {
+    ScriptApp.newTrigger(handler).timeBased().everyMinutes(5).create();
+  }
+  return {
+    success: true,
+    message: existing.length ? 'Lesson reminder trigger is already installed.' : 'Lesson reminder trigger installed.',
+    triggerCount: existing.length || 1,
+  };
+}
+
+function getLessonReminderTriggerStatus_() {
+  const count = ScriptApp.getProjectTriggers().filter(function (trigger) {
+    return trigger.getHandlerFunction() === 'sendUpcomingLessonReminders';
+  }).length;
+  return {
+    success: true,
+    message: count ? 'Lesson reminder trigger is installed.' : 'Lesson reminder trigger is not installed.',
+    triggerInstalled: count > 0,
+    triggerCount: count,
+  };
 }
 
 function parseCalendarIds_(value) {
@@ -312,7 +431,7 @@ function handleRequest_(e) {
         return jsonOut({ success: false, message: 'Primary calendar not found.' });
       }
       const description = [
-        'Booked from Palestinian Arabic Lab',
+        'Booked from Jaffer Booking',
         'Booking ID: ' + bookingId,
         'Student: ' + name,
         'Email: ' + email,
@@ -321,6 +440,10 @@ function handleRequest_(e) {
         'Timezone: ' + timeZone
       ].join('\n');
       const event = cal.createEvent('Lesson with ' + name, start, end, { description: description });
+      try {
+        event.addPopupReminder(15);
+        event.addEmailReminder(15);
+      } catch (reminderErr) {}
       var calendarInviteSent = false;
       var calendarInviteError = '';
       try {
@@ -444,6 +567,18 @@ function handleRequest_(e) {
         cancellationNotificationSent: cancellationNotificationSent,
         cancellationNotificationError: cancellationNotificationError
       });
+    }
+
+    if (action === 'installReminderTrigger') {
+      return jsonOut(installLessonReminderTrigger());
+    }
+
+    if (action === 'getReminderTriggerStatus') {
+      return jsonOut(getLessonReminderTriggerStatus_());
+    }
+
+    if (action === 'sendReminderCheck') {
+      return jsonOut(sendUpcomingLessonReminders());
     }
 
     return jsonOut({ success: false, message: 'Unknown action.' });

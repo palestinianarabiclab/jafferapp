@@ -49,8 +49,28 @@ In your site:
 3. Click `Save Apps Script URL`
 4. Click `Test Apps Script`
 5. Click `Import Busy via Apps Script`
+6. Click `Install Lesson Reminders` to send student reminder emails about 15 minutes before each lesson
 
-## 5. Optional
+After changing `apps-script/booking-sync.gs`, create a new Apps Script deployment version, then keep the same Web App URL in the dashboard unless Google gives you a new one.
+
+## 5. Lesson Reminders
+
+The script supports two reminder paths:
+
+- New Google Calendar events get a 15-minute popup/email reminder.
+- A time trigger checks every 5 minutes for lessons starting in about 15 minutes and sends one reminder email to the student.
+
+To enable the automatic email reminders:
+
+1. Deploy the latest `apps-script/booking-sync.gs`.
+2. Open the teacher dashboard.
+3. Click `Test Apps Script`.
+4. Click `Install Lesson Reminders`.
+5. Optional: click `Check Reminders Now` to run one manual check.
+
+The script stores sent reminder markers in Apps Script properties so the same booking does not receive duplicate reminder emails.
+
+## 6. Optional
 
 If you also want Preply busy times:
 1. Save your Preply calendar ID in Apps Script properties
@@ -67,3 +87,4 @@ If you also have busy events on another Google Calendar:
 - This removes the dependency on the teacher page staying open.
 - It does not use the browser Google token for booking sync.
 - If Apps Script cannot access the Preply calendar, the Google account that owns the script likely does not have permission to that calendar.
+- Reminder email sending uses your Apps Script / Gmail daily quota.
