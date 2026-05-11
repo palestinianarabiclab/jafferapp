@@ -11,6 +11,10 @@ This is the stable path for:
 2. Create a new project
 3. Replace the default file with the contents of:
    - `apps-script/booking-sync.gs`
+4. Open `Project Settings`
+5. Enable `Show "appsscript.json" manifest file in editor`
+6. Open `appsscript.json` and replace it with:
+   - `apps-script/appsscript.json`
 
 ## 2. Set Script Properties
 
@@ -49,7 +53,7 @@ In your site:
 3. Click `Save Apps Script URL`
 4. Click `Test Apps Script`
 5. Click `Import Busy via Apps Script`
-6. Click `Install Lesson Reminders` to send student reminder emails about 15 minutes before each lesson
+6. Create the reminder trigger manually in Apps Script to send student reminder emails about 15 minutes before each lesson
 
 After changing `apps-script/booking-sync.gs`, create a new Apps Script deployment version, then keep the same Web App URL in the dashboard unless Google gives you a new one.
 
@@ -63,10 +67,16 @@ The script supports two reminder paths:
 To enable the automatic email reminders:
 
 1. Deploy the latest `apps-script/booking-sync.gs`.
-2. Open the teacher dashboard.
-3. Click `Test Apps Script`.
-4. Click `Install Lesson Reminders`.
-5. Optional: click `Check Reminders Now` to run one manual check.
+2. In Apps Script, open `Triggers` from the left sidebar.
+3. Click `Add Trigger`.
+4. Choose function: `sendUpcomingLessonReminders`.
+5. Event source: `Time-driven`.
+6. Type: `Minutes timer`.
+7. Interval: `Every 5 minutes`.
+8. Save and approve Google permissions.
+9. Optional: open the teacher dashboard and click `Check Reminders Now` to run one manual check.
+
+If Google shows a permission error for `ScriptApp.getProjectTriggers`, ignore the dashboard install button and use the manual trigger steps above. Manual triggers do not need the website to call `ScriptApp`.
 
 The script stores sent reminder markers in Apps Script properties so the same booking does not receive duplicate reminder emails.
 

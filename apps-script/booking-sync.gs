@@ -199,29 +199,19 @@ function sendUpcomingLessonReminders() {
 }
 
 function installLessonReminderTrigger() {
-  const handler = 'sendUpcomingLessonReminders';
-  const existing = ScriptApp.getProjectTriggers().filter(function (trigger) {
-    return trigger.getHandlerFunction() === handler;
-  });
-  if (!existing.length) {
-    ScriptApp.newTrigger(handler).timeBased().everyMinutes(5).create();
-  }
   return {
-    success: true,
-    message: existing.length ? 'Lesson reminder trigger is already installed.' : 'Lesson reminder trigger installed.',
-    triggerCount: existing.length || 1,
+    success: false,
+    manualSetupRequired: true,
+    message: 'Create the reminder trigger manually in Apps Script: Triggers > Add Trigger > sendUpcomingLessonReminders > Time-driven > Minutes timer > Every 5 minutes.',
   };
 }
 
 function getLessonReminderTriggerStatus_() {
-  const count = ScriptApp.getProjectTriggers().filter(function (trigger) {
-    return trigger.getHandlerFunction() === 'sendUpcomingLessonReminders';
-  }).length;
   return {
     success: true,
-    message: count ? 'Lesson reminder trigger is installed.' : 'Lesson reminder trigger is not installed.',
-    triggerInstalled: count > 0,
-    triggerCount: count,
+    message: 'Reminder trigger status must be checked from the Apps Script Triggers page.',
+    triggerInstalled: null,
+    triggerCount: null,
   };
 }
 
