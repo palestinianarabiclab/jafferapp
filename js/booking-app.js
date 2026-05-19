@@ -87,6 +87,8 @@ function qs(id) {
 function cacheDom() {
     [
         "bookingTimezoneLabel",
+        "appLoadingOverlay",
+        "appLoadingText",
         "bookingWeekPrev",
         "bookingWeekNext",
         "bookingWeekLabel",
@@ -296,10 +298,42 @@ function setStatus(element, message, tone = "") {
     if (tone === "success") element.classList.add("is-success");
 }
 
+let appLoadingCount = 0;
+
+function setAppLoading(loading, message = "Loading...") {
+    if (!els.appLoadingOverlay) return;
+    appLoadingCount = Math.max(0, appLoadingCount + (loading ? 1 : -1));
+    if (loading && els.appLoadingText) {
+        els.appLoadingText.textContent = message || "Loading...";
+    }
+    const isActive = appLoadingCount > 0;
+    els.appLoadingOverlay.classList.toggle("is-active", isActive);
+    els.appLoadingOverlay.setAttribute("aria-hidden", isActive ? "false" : "true");
+}
+
+function waitForLoadingPaint() {
+    return new Promise((resolve) => {
+        window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
+    });
+}
+
+async function withAppLoading(message, task) {
+    try {
+        setAppLoading(true, message);
+        await waitForLoadingPaint();
+        return await task();
+    } finally {
+        setAppLoading(false);
+    }
+}
+
 function setButtonLoading(button, loading, loadingText = "") {
     if (!button) return;
     const label = button.querySelector(".btn__label");
     if (loading) {
+        if (!button.dataset.loadingWasDisabled) {
+            button.dataset.loadingWasDisabled = button.disabled ? "true" : "false";
+        }
         button.dataset.idleLabel = label?.textContent || button.textContent || "";
         if (label && loadingText) label.textContent = loadingText;
         if (!label && loadingText) {
@@ -317,17 +351,20 @@ function setButtonLoading(button, loading, loadingText = "") {
     }
     if (label) label.textContent = button.dataset.idleLabel || label.textContent;
     if (!label && button.dataset.idleLabel) button.textContent = button.dataset.idleLabel;
-    button.disabled = false;
+    button.disabled = button.dataset.loadingWasDisabled === "true";
+    delete button.dataset.loadingWasDisabled;
     button.classList.remove("is-loading");
 }
 
 async function withButtonLoading(button, loadingText, task) {
-    try {
-        setButtonLoading(button, true, loadingText);
-        return await task();
-    } finally {
-        setButtonLoading(button, false);
-    }
+    return withAppLoading(loadingText || "Loading...", async () => {
+        try {
+            setButtonLoading(button, true, loadingText);
+            return await task();
+        } finally {
+            setButtonLoading(button, false);
+        }
+    });
 }
 
 function normalizeAppsScriptStudentError(result, fallbackMessage) {
@@ -1257,18 +1294,24 @@ function wireStudentActions() {
         button.addEventListener("click", () => showScreen(button.getAttribute("data-target")));
     });
 
-    els.openStudentGateBtn?.addEventListener("click", () => {
+    els.openStudentGateBtn?.addEventListener("click", (event) => {
         if (isStudentSignedIn()) {
-            showScreen("student-screen");
+            withButtonLoading(event.currentTarget, "Loading...", async () => {
+                showScreen("student-screen");
+                await ensureBookingCalendarLoaded();
+            }).catch(console.error);
             return;
         }
         els.studentAuthModal?.classList.add("modal--open");
         setStatus(els.studentAuthMsg, "");
     });
 
-    els.openTeacherGateBtn?.addEventListener("click", () => {
+    els.openTeacherGateBtn?.addEventListener("click", (event) => {
         if (state.teacherUser && state.teacherRole === "teacher") {
-            showScreen("teacher-screen");
+            withButtonLoading(event.currentTarget, "Loading...", async () => {
+                showScreen("teacher-screen");
+                await refreshTeacherDashboard();
+            }).catch(console.error);
             return;
         }
         els.teacherLoginModal?.classList.add("modal--open");
@@ -1289,6 +1332,7 @@ function wireStudentActions() {
         const name = (els.studentName?.value || "").trim().slice(0, 100);
         const phone = normalizePhoneNumber();
         try {
+            setAppLoading(true, state.studentAuthMode === "signup" ? "Creating account..." : "Signing in...");
             setButtonLoading(
                 els.studentAuthSubmit,
                 true,
@@ -1328,6 +1372,7 @@ function wireStudentActions() {
         } catch (error) {
             setStatus(els.studentAuthMsg, error.message || "Student sign-in failed.", "error");
         } finally {
+            setAppLoading(false);
             setButtonLoading(els.studentAuthSubmit, false);
         }
     });
@@ -1337,18 +1382,20 @@ function wireStudentActions() {
         await withButtonLoading(els.studentLogoutBtn, "Signing out...", () => window.auth.signOut());
     });
 
-    els.bookingWeekPrev?.addEventListener("click", () => {
-        state.bookingWeekOffset = Math.max(0, state.bookingWeekOffset - 1);
-        refreshRuntimeBusyBlocks()
-            .then(() => renderBookingCalendar())
-            .catch(console.error);
+    els.bookingWeekPrev?.addEventListener("click", (event) => {
+        withButtonLoading(event.currentTarget, "Loading...", async () => {
+            state.bookingWeekOffset = Math.max(0, state.bookingWeekOffset - 1);
+            await refreshRuntimeBusyBlocks();
+            await renderBookingCalendar();
+        }).catch(console.error);
     });
 
-    els.bookingWeekNext?.addEventListener("click", () => {
-        state.bookingWeekOffset += 1;
-        refreshRuntimeBusyBlocks()
-            .then(() => renderBookingCalendar())
-            .catch(console.error);
+    els.bookingWeekNext?.addEventListener("click", (event) => {
+        withButtonLoading(event.currentTarget, "Loading...", async () => {
+            state.bookingWeekOffset += 1;
+            await refreshRuntimeBusyBlocks();
+            await renderBookingCalendar();
+        }).catch(console.error);
     });
 
     els.bookingStatusBtn?.addEventListener("click", (event) => {
@@ -1377,6 +1424,7 @@ function wireStudentActions() {
         const shouldShowLoading = Boolean(loadingTextByAction[action]);
         try {
             if (shouldShowLoading) {
+                setAppLoading(true, loadingTextByAction[action]);
                 setButtonLoading(button, true, loadingTextByAction[action]);
             }
             setStatus(els.bookingStatusMsg, "");
@@ -1420,6 +1468,7 @@ function wireStudentActions() {
             setStatus(els.bookingStatusMsg, error.message || "Could not update booking.", "error");
         } finally {
             if (shouldShowLoading) {
+                setAppLoading(false);
                 setButtonLoading(button, false);
             }
         }
@@ -1429,16 +1478,20 @@ function wireStudentActions() {
         button.addEventListener("click", () => closeRescheduleModal());
     });
 
-    els.rescheduleWeekPrev?.addEventListener("click", () => {
-        state.rescheduleModal.weekOffset = Math.max(0, Number(state.rescheduleModal.weekOffset || 0) - 1);
-        renderRescheduleModalSlots().catch((error) => {
+    els.rescheduleWeekPrev?.addEventListener("click", (event) => {
+        withButtonLoading(event.currentTarget, "Loading...", async () => {
+            state.rescheduleModal.weekOffset = Math.max(0, Number(state.rescheduleModal.weekOffset || 0) - 1);
+            await renderRescheduleModalSlots();
+        }).catch((error) => {
             setStatus(els.rescheduleMsg, error.message || "Could not load available times.", "error");
         });
     });
 
-    els.rescheduleWeekNext?.addEventListener("click", () => {
-        state.rescheduleModal.weekOffset = Number(state.rescheduleModal.weekOffset || 0) + 1;
-        renderRescheduleModalSlots().catch((error) => {
+    els.rescheduleWeekNext?.addEventListener("click", (event) => {
+        withButtonLoading(event.currentTarget, "Loading...", async () => {
+            state.rescheduleModal.weekOffset = Number(state.rescheduleModal.weekOffset || 0) + 1;
+            await renderRescheduleModalSlots();
+        }).catch((error) => {
             setStatus(els.rescheduleMsg, error.message || "Could not load available times.", "error");
         });
     });
@@ -1539,7 +1592,7 @@ function wireStudentActions() {
         const name = getStudentName();
         const phone = getStudentPhone();
 
-        await submitGuestBooking({
+        await withAppLoading("Confirming booking...", () => submitGuestBooking({
             db: window.db,
             bookingSettings: state.bookingSettings,
             contactSettings: state.contactSettings,
@@ -1583,7 +1636,7 @@ function wireStudentActions() {
             createBookingViaAppsScript: window.createBookingViaAppsScript,
             loadBookingStatus,
             isLocalDevHost,
-        });
+        }));
     });
 }
 
@@ -1968,6 +2021,7 @@ function wireTeacherActions() {
             return;
         }
         try {
+            setAppLoading(true, "Signing in...");
             setButtonLoading(els.teacherLoginSubmit, true, "Signing in...");
             setStatus(els.teacherLoginMsg, "Signing in...");
             await window.auth.signInWithEmailAndPassword(
@@ -1977,6 +2031,7 @@ function wireTeacherActions() {
         } catch (error) {
             setStatus(els.teacherLoginMsg, error.message || "Sign-in failed.", "error");
         } finally {
+            setAppLoading(false);
             setButtonLoading(els.teacherLoginSubmit, false);
         }
     });
@@ -2226,7 +2281,12 @@ function wireTeacherActions() {
         const shouldShowLoading = Boolean(teacherBookingLoadingText[action]);
         try {
             if (shouldShowLoading) {
+                setAppLoading(true, teacherBookingLoadingText[action]);
                 setButtonLoading(button, true, teacherBookingLoadingText[action]);
+                if (action === "reschedule") {
+                    setStatus(els.teacherBookingMsg, "Loading available times...");
+                    await waitForLoadingPaint();
+                }
             }
             if (action === "cancel") {
                 const deleteResult = await deleteCalendarEventForBooking(bookingId, booking);
@@ -2299,6 +2359,7 @@ function wireTeacherActions() {
             setStatus(els.teacherBookingMsg, error.message || "Booking update failed.", "error");
         } finally {
             if (shouldShowLoading) {
+                setAppLoading(false);
                 setButtonLoading(button, false);
             }
         }
@@ -2370,7 +2431,7 @@ function showScreen(screenId) {
         button.classList.toggle("is-active", button.getAttribute("data-target") === screenId);
     });
     if (screenId === "student-screen") {
-        ensureBookingCalendarLoaded().catch(console.error);
+        withAppLoading("Loading available times...", () => ensureBookingCalendarLoaded()).catch(console.error);
         startGoogleBusyAutoRefresh();
     }
 }
@@ -2472,7 +2533,7 @@ async function init() {
     }
 
     window.auth.onAuthStateChanged((user) => {
-        handleAuthState(user).catch(console.error);
+        withAppLoading("Loading account...", () => handleAuthState(user)).catch(console.error);
     });
 }
 

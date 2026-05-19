@@ -465,7 +465,8 @@ main.site-shell {
     width: 100%;
 }
 
-.btn[disabled] {
+.btn[disabled],
+.welcome-card[disabled] {
     cursor: not-allowed;
     opacity: 0.6;
     transform: none;
@@ -481,8 +482,49 @@ main.site-shell {
     animation: spin 0.8s linear infinite;
 }
 
-.btn.is-loading .btn__spinner {
+.btn.is-loading .btn__spinner,
+.is-loading .btn__spinner {
     display: inline-block;
+}
+
+.app-loading {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    display: none;
+    place-items: center;
+    padding: 20px;
+    background: rgba(15, 23, 42, 0.22);
+    backdrop-filter: blur(3px);
+}
+
+.app-loading.is-active {
+    display: grid;
+}
+
+.app-loading__box {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 190px;
+    max-width: min(340px, 100%);
+    padding: 16px 18px;
+    border: 1px solid rgba(15, 118, 110, 0.18);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.96);
+    color: var(--primary-dark);
+    font-weight: 700;
+    box-shadow: var(--shadow);
+}
+
+.app-loading__spinner {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    border: 3px solid rgba(15, 118, 110, 0.18);
+    border-top-color: var(--primary);
+    animation: spin 0.8s linear infinite;
 }
 
 .divider {
