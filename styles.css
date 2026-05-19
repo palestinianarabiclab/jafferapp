@@ -932,10 +932,16 @@ main.site-shell {
     position: relative;
     z-index: 1;
     width: min(520px, calc(100% - 24px));
+    max-height: calc(100vh - 32px);
+    overflow: auto;
     padding: 24px;
     border-radius: 24px;
     background: var(--surface-strong);
     box-shadow: var(--shadow);
+}
+
+.modal__body--wide {
+    width: min(980px, calc(100% - 24px));
 }
 
 .modal__close {
@@ -959,6 +965,32 @@ main.site-shell {
 
 .status-line.is-success {
     color: var(--primary-dark);
+}
+
+.reschedule-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 10px;
+    margin: 14px 0;
+}
+
+.reschedule-grid .booking-day-column {
+    min-height: 170px;
+    padding: 12px;
+}
+
+.reschedule-slot-btn {
+    text-align: center;
+}
+
+.reschedule-custom {
+    display: grid;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.reschedule-custom[hidden] {
+    display: none;
 }
 
 @keyframes spin {
@@ -1046,6 +1078,20 @@ main.site-shell {
         scroll-snap-type: x mandatory;
         scrollbar-width: thin;
         -webkit-overflow-scrolling: touch;
+    }
+
+    .reschedule-grid {
+        display: flex;
+        grid-template-columns: none;
+        overflow-x: auto;
+        gap: 12px;
+        padding-bottom: 12px;
+        scroll-snap-type: x mandatory;
+    }
+
+    .reschedule-grid .booking-day-column {
+        flex: 0 0 min(82vw, 320px);
+        scroll-snap-align: start;
     }
 
     .panel,

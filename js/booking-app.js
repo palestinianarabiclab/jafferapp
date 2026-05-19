@@ -15,7 +15,6 @@ import {
 } from "./logic/guestBookingFlow.js";
 import {
     renderTeacherBookings,
-    openReschedulePanel,
     cancelBooking,
     rescheduleBooking,
     clearAllBookings,
@@ -69,6 +68,14 @@ const state = {
     busyBlocksRangeDays: 0,
     busySyncReady: false,
     busySyncMessage: "",
+    rescheduleModal: {
+        role: "",
+        bookingId: "",
+        booking: null,
+        weekOffset: 0,
+        selectedSlot: 0,
+        allowCustom: false,
+    },
 };
 
 const els = {};
@@ -119,6 +126,17 @@ function cacheDom() {
         "contactEmailBtn",
         "bookingSuccessModal",
         "bookingSuccessText",
+        "rescheduleModal",
+        "rescheduleModalHint",
+        "rescheduleWeekPrev",
+        "rescheduleWeekNext",
+        "rescheduleWeekLabel",
+        "rescheduleGrid",
+        "rescheduleCustomFields",
+        "rescheduleCustomDate",
+        "rescheduleCustomTime",
+        "rescheduleMsg",
+        "rescheduleConfirmBtn",
         "openStudentGateBtn",
         "openTeacherGateBtn",
         "teacherLoginModal",
@@ -395,6 +413,16 @@ function getCustomTeacherSlotMs(item) {
     return zonedDateTimeToUtcMs(getTeacherTimezone(), year, month, day, hour, minute);
 }
 
+function getModalCustomSlotMs() {
+    const date = els.rescheduleCustomDate?.value || "";
+    const time = els.rescheduleCustomTime?.value || "";
+    if (!date || !time) return 0;
+    const [year, month, day] = date.split("-").map(Number);
+    const [hour, minute] = time.split(":").map(Number);
+    if (!year || !month || !day || !Number.isFinite(hour) || !Number.isFinite(minute)) return 0;
+    return zonedDateTimeToUtcMs(getTeacherTimezone(), year, month, day, hour, minute);
+}
+
 function hashEmail(email) {
     const normalized = String(email || "").trim().toLowerCase();
     const encoder = new TextEncoder();
@@ -575,9 +603,9 @@ function bookingDeps() {
     };
 }
 
-async function refreshRuntimeBusyBlocks({ force = false } = {}) {
-    const daysToFetch = Math.max(8, (state.bookingWeekOffset + 1) * 7 + 1);
-    const requestedDays = Math.min(daysToFetch, 21);
+async function refreshRuntimeBusyBlocks({ force = false, minDays = 0 } = {}) {
+    const daysToFetch = Math.max(8, Number(minDays || 0), (state.bookingWeekOffset + 1) * 7 + 1);
+    const requestedDays = Math.min(daysToFetch, 90);
     if (
         !force
         && state.busySyncReady
@@ -589,15 +617,15 @@ async function refreshRuntimeBusyBlocks({ force = false } = {}) {
     if (state.busyRefreshInFlight) {
         return state.busyRefreshInFlight;
     }
-    state.busyRefreshInFlight = refreshRuntimeBusyBlocksNow({ force }).finally(() => {
+    state.busyRefreshInFlight = refreshRuntimeBusyBlocksNow({ force, minDays }).finally(() => {
         state.busyRefreshInFlight = null;
     });
     return state.busyRefreshInFlight;
 }
 
-async function refreshRuntimeBusyBlocksNow({ force = false } = {}) {
-    const daysToFetch = Math.max(8, (state.bookingWeekOffset + 1) * 7 + 1);
-    const requestedDays = Math.min(daysToFetch, 21);
+async function refreshRuntimeBusyBlocksNow({ force = false, minDays = 0 } = {}) {
+    const daysToFetch = Math.max(8, Number(minDays || 0), (state.bookingWeekOffset + 1) * 7 + 1);
+    const requestedDays = Math.min(daysToFetch, 90);
     if (
         !force
         && state.busySyncReady
@@ -1057,6 +1085,154 @@ async function deleteCalendarEventForBooking(bookingId, booking) {
     });
 }
 
+async function rescheduleTeacherBooking(bookingId, booking, newSlot) {
+    const conflict = await findBookingConflict(newSlot, bookingDeps(), { excludeBookingId: bookingId });
+    if (conflict) {
+        throw new Error("That slot is already taken.");
+    }
+    const deleteResult = await deleteCalendarEventForBooking(bookingId, booking);
+    if (deleteResult?.success === false && !isAlreadyDeletedCalendarEvent(deleteResult)) {
+        throw new Error(normalizeAppsScriptStudentError(deleteResult, "Could not remove the old Google Calendar event."));
+    }
+    const createResult = await createCalendarEventForBooking(bookingId, booking, newSlot);
+    if (createResult?.success === false) {
+        throw new Error(createResult.message || "Could not create the new Google Calendar event.");
+    }
+    await rescheduleBooking({
+        db: window.db,
+        firebase: window.firebase,
+        bookingId,
+        booking,
+        newSlot,
+        calendarSynced: !!createResult?.success,
+        googleCalendarEventId: createResult?.eventId || null,
+    });
+}
+
+function resetRescheduleModal() {
+    state.rescheduleModal = {
+        role: "",
+        bookingId: "",
+        booking: null,
+        weekOffset: 0,
+        selectedSlot: 0,
+        allowCustom: false,
+    };
+    if (els.rescheduleGrid) els.rescheduleGrid.innerHTML = "";
+    if (els.rescheduleMsg) setStatus(els.rescheduleMsg, "");
+    if (els.rescheduleCustomDate) els.rescheduleCustomDate.value = "";
+    if (els.rescheduleCustomTime) els.rescheduleCustomTime.value = "";
+}
+
+function closeRescheduleModal() {
+    els.rescheduleModal?.classList.remove("modal--open");
+    resetRescheduleModal();
+}
+
+function setRescheduleSelectedSlot(slotMs) {
+    state.rescheduleModal.selectedSlot = Number(slotMs || 0);
+    document.querySelectorAll("[data-reschedule-slot]").forEach((button) => {
+        button.classList.toggle("is-selected", Number(button.dataset.rescheduleSlot || 0) === state.rescheduleModal.selectedSlot);
+    });
+    if (state.rescheduleModal.selectedSlot) {
+        if (els.rescheduleCustomDate) els.rescheduleCustomDate.value = "";
+        if (els.rescheduleCustomTime) els.rescheduleCustomTime.value = "";
+    }
+}
+
+async function renderRescheduleModalSlots() {
+    if (!els.rescheduleGrid) return;
+    setStatus(els.rescheduleMsg, "");
+    els.rescheduleGrid.innerHTML = "<div class=\"small-note\">Loading available times...</div>";
+    const offset = Math.max(0, state.rescheduleModal.weekOffset || 0);
+    state.rescheduleModal.weekOffset = offset;
+    if (els.rescheduleWeekPrev) els.rescheduleWeekPrev.disabled = offset === 0;
+    const timezone = getDisplayTimezone();
+    const startKey = getScheduleStartDateKey(offset, timezone);
+    const endKey = addDaysToDateKey(startKey, 6);
+    if (els.rescheduleWeekLabel) {
+        els.rescheduleWeekLabel.textContent = `${formatDateKey(startKey, { month: "short", day: "numeric" })} - ${formatDateKey(endKey, { month: "short", day: "numeric" })}`;
+    }
+
+    await refreshRuntimeBusyBlocks({ minDays: (offset + 1) * 7 + 1 });
+    const [startYear, startMonth, startDay] = startKey.split("-").map(Number);
+    const weekEndKey = addDaysToDateKey(startKey, 7);
+    const [endYear, endMonth, endDay] = weekEndKey.split("-").map(Number);
+    const rangeStartMs = zonedDateTimeToUtcMs(timezone, startYear, startMonth, startDay, 0, 0);
+    const rangeEndMs = zonedDateTimeToUtcMs(timezone, endYear, endMonth, endDay, 0, 0);
+    const slots = await getAvailableSlots(7, bookingDeps(), {
+        excludeBookingId: state.rescheduleModal.bookingId,
+        rangeStartMs,
+        rangeEndMs,
+    });
+    const days = Array.from({ length: 7 }, (_, index) => {
+        const dateKey = addDaysToDateKey(startKey, index);
+        return { dateKey, slots: [] };
+    });
+    const dayMap = new Map(days.map((day) => [day.dateKey, day]));
+    slots.forEach((slotDate) => {
+        const dateKey = getDateKey(slotDate, timezone);
+        if (dayMap.has(dateKey)) {
+            dayMap.get(dateKey).slots.push(slotDate);
+        }
+    });
+
+    const html = days.map((day) => {
+        const daySlots = day.slots
+            .sort((a, b) => a.getTime() - b.getTime())
+            .map((slotDate) => {
+                const ts = slotDate.getTime();
+                const label = slotDate.toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    timeZone: timezone,
+                });
+                return `<button type="button" class="slot-btn reschedule-slot-btn" data-reschedule-slot="${ts}">${escapeHtml(label)}</button>`;
+            })
+            .join("");
+        return `
+            <div class="booking-day-column ${daySlots ? "" : "is-empty"}">
+                <div class="booking-day-header">
+                    <div class="booking-day-label">${escapeHtml(formatDateKey(day.dateKey, { weekday: "short" }))}</div>
+                    <div class="booking-day-date">${escapeHtml(formatDateKey(day.dateKey, { month: "short", day: "numeric" }))}</div>
+                </div>
+                <div class="booking-day-slots">
+                    ${daySlots || "<div class=\"booking-day-empty\">No times</div>"}
+                </div>
+            </div>
+        `;
+    }).join("");
+    els.rescheduleGrid.innerHTML = html;
+    setRescheduleSelectedSlot(state.rescheduleModal.selectedSlot);
+}
+
+async function openRescheduleModal({ role, bookingId, booking = null, allowCustom = false }) {
+    if (!bookingId) return;
+    let resolvedBooking = booking;
+    if (!resolvedBooking) {
+        const snap = await window.db.collection("bookings").doc(bookingId).get();
+        resolvedBooking = { id: snap.id, ...(snap.data() || {}) };
+    }
+    state.rescheduleModal = {
+        role,
+        bookingId,
+        booking: resolvedBooking,
+        weekOffset: 0,
+        selectedSlot: 0,
+        allowCustom,
+    };
+    if (els.rescheduleModalHint) {
+        els.rescheduleModalHint.textContent = allowCustom
+            ? "Choose an available time, or enter a custom teacher time."
+            : "Choose an available teacher time.";
+    }
+    if (els.rescheduleCustomFields) {
+        els.rescheduleCustomFields.hidden = !allowCustom;
+    }
+    els.rescheduleModal?.classList.add("modal--open");
+    await renderRescheduleModalSlots();
+}
+
 async function createCalendarEventForBooking(bookingId, booking, slot) {
     if (typeof window.createBookingViaAppsScript !== "function") {
         return { success: false, message: "Apps Script is not available." };
@@ -1218,7 +1394,13 @@ function wireStudentActions() {
                 return;
             }
             if (action === "reschedule") {
-                await openStudentReschedulePanel(item, bookingId);
+                const bookingSnap = await window.db.collection("bookings").doc(bookingId).get();
+                const booking = { id: bookingSnap.id, ...(bookingSnap.data() || {}) };
+                if (booking.studentUid !== state.currentUser?.uid) throw new Error("This booking does not belong to your account.");
+                if (Number(booking.slot || 0) - Date.now() < STUDENT_CHANGE_CUTOFF_MS) {
+                    throw new Error("You cannot reschedule less than 12 hours before the lesson.");
+                }
+                await openRescheduleModal({ role: "student", bookingId, booking, allowCustom: false });
                 return;
             }
             if (action === "confirm-reschedule") {
@@ -1240,6 +1422,72 @@ function wireStudentActions() {
             if (shouldShowLoading) {
                 setButtonLoading(button, false);
             }
+        }
+    });
+
+    document.querySelectorAll("[data-close-reschedule-modal]").forEach((button) => {
+        button.addEventListener("click", () => closeRescheduleModal());
+    });
+
+    els.rescheduleWeekPrev?.addEventListener("click", () => {
+        state.rescheduleModal.weekOffset = Math.max(0, Number(state.rescheduleModal.weekOffset || 0) - 1);
+        renderRescheduleModalSlots().catch((error) => {
+            setStatus(els.rescheduleMsg, error.message || "Could not load available times.", "error");
+        });
+    });
+
+    els.rescheduleWeekNext?.addEventListener("click", () => {
+        state.rescheduleModal.weekOffset = Number(state.rescheduleModal.weekOffset || 0) + 1;
+        renderRescheduleModalSlots().catch((error) => {
+            setStatus(els.rescheduleMsg, error.message || "Could not load available times.", "error");
+        });
+    });
+
+    els.rescheduleGrid?.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-reschedule-slot]");
+        if (!button) return;
+        setRescheduleSelectedSlot(Number(button.dataset.rescheduleSlot || 0));
+        setStatus(els.rescheduleMsg, "");
+    });
+
+    [els.rescheduleCustomDate, els.rescheduleCustomTime].forEach((input) => {
+        input?.addEventListener("input", () => {
+            if (!state.rescheduleModal.allowCustom) return;
+            state.rescheduleModal.selectedSlot = 0;
+            document.querySelectorAll("[data-reschedule-slot]").forEach((button) => button.classList.remove("is-selected"));
+            setStatus(els.rescheduleMsg, "");
+        });
+    });
+
+    els.rescheduleConfirmBtn?.addEventListener("click", async (event) => {
+        const modalState = state.rescheduleModal;
+        if (!modalState.bookingId || !modalState.booking) return;
+        const customSlot = modalState.allowCustom ? getModalCustomSlotMs() : 0;
+        const newSlot = Number(modalState.selectedSlot || 0) || customSlot;
+        if (!newSlot) {
+            setStatus(els.rescheduleMsg, "Choose an available time first.", "error");
+            return;
+        }
+        if (newSlot <= Date.now()) {
+            setStatus(els.rescheduleMsg, "Choose a future time.", "error");
+            return;
+        }
+        try {
+            await withButtonLoading(event.currentTarget, "Rescheduling...", async () => {
+                if (modalState.role === "student") {
+                    await rescheduleStudentBooking(modalState.bookingId, newSlot);
+                    setStatus(els.bookingStatusMsg, "Booking rescheduled.", "success");
+                    await loadStudentBookings();
+                } else {
+                    await rescheduleTeacherBooking(modalState.bookingId, modalState.booking, newSlot);
+                    setStatus(els.teacherBookingMsg, "Booking rescheduled.", "success");
+                    await refreshTeacherBookings();
+                }
+                await renderBookingCalendar();
+                closeRescheduleModal();
+            });
+        } catch (error) {
+            setStatus(els.rescheduleMsg, error.message || "Could not reschedule booking.", "error");
         }
     });
 
@@ -1993,11 +2241,11 @@ function wireTeacherActions() {
             }
 
             if (action === "reschedule") {
-                await openReschedulePanel({
-                    itemEl: item,
+                await openRescheduleModal({
+                    role: "teacher",
+                    bookingId,
                     booking: { ...booking, id: bookingId },
-                    getAvailableSlots: (days, options) => getAvailableSlots(days, bookingDeps(), options),
-                    escapeHtml,
+                    allowCustom: true,
                 });
                 return;
             }

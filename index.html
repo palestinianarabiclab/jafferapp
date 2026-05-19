@@ -640,6 +640,39 @@
         </div>
     </div>
 
+    <div id="rescheduleModal" class="modal">
+        <div class="modal__backdrop" data-close-reschedule-modal></div>
+        <div class="modal__body modal__body--wide">
+            <button class="modal__close" data-close-reschedule-modal type="button">&times;</button>
+            <h3>Reschedule Lesson</h3>
+            <p class="small-note" id="rescheduleModalHint">Choose an available time.</p>
+            <div class="week-nav">
+                <button type="button" class="btn btn--ghost btn--small" id="rescheduleWeekPrev">Previous</button>
+                <div id="rescheduleWeekLabel" class="week-nav__label">This week</div>
+                <button type="button" class="btn btn--ghost btn--small" id="rescheduleWeekNext">Next</button>
+            </div>
+            <div id="rescheduleGrid" class="reschedule-grid"></div>
+            <div id="rescheduleCustomFields" class="reschedule-custom" hidden>
+                <div class="divider"></div>
+                <div class="form-grid">
+                    <label class="field">
+                        <span>Custom Date</span>
+                        <input id="rescheduleCustomDate" type="date" />
+                    </label>
+                    <label class="field">
+                        <span>Custom Time</span>
+                        <input id="rescheduleCustomTime" type="time" />
+                    </label>
+                </div>
+            </div>
+            <p id="rescheduleMsg" class="status-line"></p>
+            <div class="action-row action-row--end">
+                <button class="btn btn--ghost btn--small" data-close-reschedule-modal type="button">Close</button>
+                <button class="btn btn--primary btn--small" id="rescheduleConfirmBtn" type="button">Confirm New Time</button>
+            </div>
+        </div>
+    </div>
+
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
