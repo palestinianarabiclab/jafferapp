@@ -57,6 +57,8 @@ const state = {
     studentCache: new Map(),
     googleCalendarMessage: "",
     busyRefreshTimer: null,
+    balanceReconcileTimer: null,
+    studentProfileUnsubscribe: null,
     busyRefreshInFlight: null,
     googleCalendarModuleLoading: null,
     publicSettingsLoaded: false,
@@ -148,6 +150,7 @@ function cacheDom() {
         "appsScriptQuotaBtn",
         "appsScriptInstallReminderBtn",
         "appsScriptReminderCheckBtn",
+        "appsScriptBalanceCheckBtn",
         "appsScriptEmailQuota",
         "appsScriptEmailQuotaValue",
         "exceptionForm",
@@ -382,6 +385,16 @@ function formatDateKey(dateKey, options = {}) {
     });
 }
 
+function getCustomTeacherSlotMs(item) {
+    const date = item.querySelector(".booking-resched-date")?.value || "";
+    const time = item.querySelector(".booking-resched-time")?.value || "";
+    if (!date || !time) return 0;
+    const [year, month, day] = date.split("-").map(Number);
+    const [hour, minute] = time.split(":").map(Number);
+    if (!year || !month || !day || !Number.isFinite(hour) || !Number.isFinite(minute)) return 0;
+    return zonedDateTimeToUtcMs(getTeacherTimezone(), year, month, day, hour, minute);
+}
+
 function hashEmail(email) {
     const normalized = String(email || "").trim().toLowerCase();
     const encoder = new TextEncoder();
@@ -497,6 +510,28 @@ function updateStudentAuthUi() {
     }
     updateStudentBalanceUi();
     updateBookingSubmitState();
+}
+
+function stopStudentProfileListener() {
+    if (typeof state.studentProfileUnsubscribe === "function") {
+        state.studentProfileUnsubscribe();
+    }
+    state.studentProfileUnsubscribe = null;
+}
+
+function startStudentProfileListener() {
+    stopStudentProfileListener();
+    if (!window.db || !state.currentUser || state.currentRole !== "student") return;
+    state.studentProfileUnsubscribe = window.db
+        .collection("users")
+        .doc(state.currentUser.uid)
+        .onSnapshot((snap) => {
+            if (!snap.exists) return;
+            state.studentProfile = snap.data() || {};
+            updateStudentAuthUi();
+        }, (error) => {
+            console.warn("Could not watch student profile.", error);
+        });
 }
 
 function setSelectedSlot(slotMs) {
@@ -892,6 +927,7 @@ async function cancelStudentBooking(bookingId) {
         updatedAt: Date.now(),
         calendarSynced: false,
         canceledAt: Date.now(),
+        canceledBy: "student",
         history: window.firebase.firestore.FieldValue.arrayUnion({
             at: Date.now(),
             action: "canceled",
@@ -1413,9 +1449,11 @@ async function refreshTeacherDashboard() {
     window.bookingSettings = state.bookingSettings;
     await refreshRuntimeBusyBlocks();
     syncTeacherFormFields();
-    const chargedCount = await reconcileStudentBalances();
-    if (chargedCount && els.teacherStudentsMsg) {
-        setStatus(els.teacherStudentsMsg, `Deducted ${chargedCount} due lesson charge${chargedCount === 1 ? "" : "s"}.`, "success");
+    const balanceResult = await reconcileStudentBalances();
+    if (balanceResult.chargedCount && els.teacherStudentsMsg) {
+        setStatus(els.teacherStudentsMsg, `Deducted ${balanceResult.chargedCount} due lesson charge${balanceResult.chargedCount === 1 ? "" : "s"}.`, "success");
+    } else if (balanceResult.missingPriceCount && els.teacherStudentsMsg) {
+        setStatus(els.teacherStudentsMsg, "Some due lessons were not deducted because lesson price is not set.", "error");
     }
     await refreshTeacherStudents();
     await refreshTeacherBookings();
@@ -1424,6 +1462,11 @@ async function refreshTeacherDashboard() {
 }
 
 async function refreshTeacherBookings() {
+    const balanceResult = await reconcileStudentBalances();
+    if (balanceResult.chargedCount && els.teacherStudentsMsg) {
+        setStatus(els.teacherStudentsMsg, `Deducted ${balanceResult.chargedCount} due lesson charge${balanceResult.chargedCount === 1 ? "" : "s"}.`, "success");
+        await refreshTeacherStudents();
+    }
     state.bookingCache = await renderTeacherBookings({
         db: window.db,
         teacherBookingList: els.teacherBookingList,
@@ -1431,6 +1474,27 @@ async function refreshTeacherBookings() {
         escapeHtml,
         formatSlotTime,
     });
+}
+
+function startBalanceReconcileAutoRefresh() {
+    if (state.balanceReconcileTimer) return;
+    state.balanceReconcileTimer = window.setInterval(() => {
+        if (!state.teacherUser || state.teacherRole !== "teacher") return;
+        reconcileStudentBalances()
+            .then(async (result) => {
+                if (!result?.chargedCount) return;
+                setStatus(els.teacherStudentsMsg, `Deducted ${result.chargedCount} due lesson charge${result.chargedCount === 1 ? "" : "s"}.`, "success");
+                await refreshTeacherStudents();
+                await refreshTeacherBookings();
+            })
+            .catch(console.error);
+    }, 60000);
+}
+
+function stopBalanceReconcileAutoRefresh() {
+    if (!state.balanceReconcileTimer) return;
+    window.clearInterval(state.balanceReconcileTimer);
+    state.balanceReconcileTimer = null;
 }
 
 async function refreshTeacherStudents() {
@@ -1496,21 +1560,55 @@ async function saveStudentFinance(studentId, balance, lessonPrice) {
     }, { merge: true });
 }
 
+async function loadBalanceChargeCandidates(now) {
+    const docsById = new Map();
+    const addDocs = (snap) => {
+        snap.forEach((doc) => {
+            docsById.set(doc.id, doc);
+        });
+    };
+
+    try {
+        const pastSnap = await window.db
+            .collection("bookings")
+            .where("slot", "<=", now)
+            .orderBy("slot", "desc")
+            .limit(300)
+            .get();
+        addDocs(pastSnap);
+    } catch {
+        const fallbackSnap = await window.db.collection("bookings").limit(500).get();
+        addDocs(fallbackSnap);
+    }
+
+    try {
+        const canceledSnap = await window.db
+            .collection("bookings")
+            .where("status", "==", "canceled")
+            .limit(300)
+            .get();
+        addDocs(canceledSnap);
+    } catch {}
+
+    return Array.from(docsById.values());
+}
+
 async function reconcileStudentBalances() {
     const now = Date.now();
-    const snap = await window.db
-        .collection("bookings")
-        .limit(400)
-        .get();
+    const docs = await loadBalanceChargeCandidates(now);
     let chargedCount = 0;
     const studentDocs = new Map();
-    for (const doc of snap.docs) {
+    const missingPrice = new Set();
+    for (const doc of docs) {
         const booking = doc.data() || {};
         const status = String(booking.status || "booked").toLowerCase();
         if (!booking.studentUid || booking.balanceChargedAt) continue;
         const shouldChargeAttended = Number(booking.slot || 0) <= now && (status === "booked" || status === "rescheduled");
         const canceledAt = Number(booking.canceledAt || 0);
-        const lateCanceled = status === "canceled" && canceledAt && Number(booking.slot || 0) - canceledAt < STUDENT_CHANGE_CUTOFF_MS;
+        const lateCanceled = status === "canceled" &&
+            String(booking.canceledBy || "student").toLowerCase() === "student" &&
+            canceledAt &&
+            Number(booking.slot || 0) - canceledAt < STUDENT_CHANGE_CUTOFF_MS;
         if (!shouldChargeAttended && !lateCanceled) continue;
 
         let studentSnap = studentDocs.get(booking.studentUid);
@@ -1520,7 +1618,10 @@ async function reconcileStudentBalances() {
         }
         const student = studentSnap.exists ? (studentSnap.data() || {}) : {};
         const lessonPrice = toMoneyValue(booking.lessonPrice || student.lessonPrice);
-        if (!lessonPrice) continue;
+        if (!lessonPrice) {
+            missingPrice.add(booking.studentUid);
+            continue;
+        }
         const chargeReason = lateCanceled ? "late-cancel" : "lesson";
         const batch = window.db.batch();
         batch.set(window.db.collection("users").doc(booking.studentUid), {
@@ -1548,7 +1649,7 @@ async function reconcileStudentBalances() {
         });
         chargedCount += 1;
     }
-    return chargedCount;
+    return { chargedCount, missingPriceCount: missingPrice.size };
 }
 
 function updateEmailQuotaUi(result) {
@@ -1741,6 +1842,16 @@ function wireTeacherActions() {
         setStatus(els.appsScriptMsg, message, result?.success ? "success" : "error");
     });
 
+    els.appsScriptBalanceCheckBtn?.addEventListener("click", async (event) => {
+        const result = await withButtonLoading(event.currentTarget, "Checking...", () => window.reconcileBalancesViaAppsScript?.());
+        const count = Number(result?.chargedCount || 0);
+        const message = result?.message
+            ? `${result.message} Deducted ${count} lesson charge${count === 1 ? "" : "s"}.`
+            : `Deducted ${count} lesson charge${count === 1 ? "" : "s"}.`;
+        setStatus(els.appsScriptMsg, message, result?.success ? "success" : "error");
+        await refreshTeacherStudents();
+    });
+
     els.exceptionForm?.addEventListener("submit", async (event) => {
         event.preventDefault();
         const submitter = event.submitter;
@@ -1792,11 +1903,13 @@ function wireTeacherActions() {
 
     els.reconcileBalancesBtn?.addEventListener("click", (event) => {
         withButtonLoading(event.currentTarget, "Deducting...", async () => {
-            const chargedCount = await reconcileStudentBalances();
+            const result = await reconcileStudentBalances();
             await refreshTeacherStudents();
-            setStatus(els.teacherStudentsMsg, chargedCount
-                ? `Deducted ${chargedCount} due lesson charge${chargedCount === 1 ? "" : "s"}.`
-                : "No due lessons to deduct.", chargedCount ? "success" : "");
+            setStatus(els.teacherStudentsMsg, result.chargedCount
+                ? `Deducted ${result.chargedCount} due lesson charge${result.chargedCount === 1 ? "" : "s"}.`
+                : result.missingPriceCount
+                    ? "Some due lessons need a lesson price before deduction."
+                    : "No due lessons to deduct.", result.chargedCount ? "success" : result.missingPriceCount ? "error" : "");
         }).catch((error) => {
             setStatus(els.teacherStudentsMsg, error.message || "Could not deduct balances.", "error");
         });
@@ -1897,8 +2010,17 @@ function wireTeacherActions() {
 
             if (action === "confirm-reschedule") {
                 const select = item.querySelector(".booking-resched-select");
-                const newSlot = Number(select?.value || 0);
-                if (!newSlot) return;
+                const selectedSlot = Number(select?.value || 0);
+                const customSlot = getCustomTeacherSlotMs(item);
+                const newSlot = selectedSlot || customSlot;
+                if (!newSlot) {
+                    setStatus(els.teacherBookingMsg, "Choose an available slot or enter a custom date and time.", "error");
+                    return;
+                }
+                if (newSlot <= Date.now()) {
+                    setStatus(els.teacherBookingMsg, "Choose a future time.", "error");
+                    return;
+                }
                 const conflict = await findBookingConflict(newSlot, bookingDeps(), { excludeBookingId: bookingId });
                 if (conflict) {
                     setStatus(els.teacherBookingMsg, "That slot is already taken.", "error");
@@ -2006,6 +2128,8 @@ function showScreen(screenId) {
 }
 
 async function handleAuthState(user) {
+    stopStudentProfileListener();
+    stopBalanceReconcileAutoRefresh();
     state.currentUser = user || null;
     state.currentRole = "";
     state.studentProfile = null;
@@ -2044,6 +2168,7 @@ async function handleAuthState(user) {
         setStatus(els.teacherLoginMsg, "");
         updateStudentAuthUi();
         showScreen("student-screen");
+        startStudentProfileListener();
         await Promise.all([
             loadStudentBookings(),
             ensureBookingCalendarLoaded(),
@@ -2075,6 +2200,7 @@ async function handleAuthState(user) {
         els.teacherPreplyCalendarId.value = teacherData.preplyCalendarId || teacherData.googleCalendar?.preplyCalendarId || "";
     }
     await refreshTeacherDashboard();
+    startBalanceReconcileAutoRefresh();
     refreshAppsScriptEmailQuota().catch(console.error);
     showScreen("teacher-screen");
 }

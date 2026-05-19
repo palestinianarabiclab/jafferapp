@@ -9,6 +9,10 @@ function getConfig_() {
   const preplyRaw = props.getProperty('PREPLY_CALENDAR_ID') || '';
   const additionalRaw = props.getProperty('ADDITIONAL_CALENDAR_IDS') || '';
   return {
+    firebaseApiKey: props.getProperty('FIREBASE_API_KEY') || 'AIzaSyCfhVE4hdR5P7YW6JOAnSC5az7s-J8zEsc',
+    firebaseProjectId: props.getProperty('FIREBASE_PROJECT_ID') || 'jafferapp',
+    firebaseTeacherEmail: props.getProperty('FIREBASE_TEACHER_EMAIL') || '',
+    firebaseTeacherPassword: props.getProperty('FIREBASE_TEACHER_PASSWORD') || '',
     primaryCalendarId: props.getProperty('PRIMARY_CALENDAR_ID') || 'primary',
     preplyCalendarId: normalizeCalendarId_(preplyRaw),
     additionalCalendarIds: parseCalendarIds_(additionalRaw),
@@ -16,6 +20,8 @@ function getConfig_() {
     notificationEmail: props.getProperty('NOTIFICATION_EMAIL') || '',
   };
 }
+
+const STUDENT_CHANGE_CUTOFF_MS_ = 12 * 60 * 60 * 1000;
 
 function normalizeEmail_(value) {
   return String(value || '').trim().toLowerCase();
@@ -212,6 +218,222 @@ function getLessonReminderTriggerStatus_() {
     message: 'Reminder trigger status must be checked from the Apps Script Triggers page.',
     triggerInstalled: null,
     triggerCount: null,
+  };
+}
+
+function firebaseSignIn_(config) {
+  if (!config.firebaseApiKey || !config.firebaseTeacherEmail || !config.firebaseTeacherPassword) {
+    throw new Error('Missing FIREBASE_API_KEY, FIREBASE_TEACHER_EMAIL, or FIREBASE_TEACHER_PASSWORD in Script Properties.');
+  }
+  const url = 'https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=' + encodeURIComponent(config.firebaseApiKey);
+  const res = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    muteHttpExceptions: true,
+    payload: JSON.stringify({
+      email: config.firebaseTeacherEmail,
+      password: config.firebaseTeacherPassword,
+      returnSecureToken: true,
+    }),
+  });
+  const text = res.getContentText();
+  const data = text ? JSON.parse(text) : {};
+  if (res.getResponseCode() >= 300 || !data.idToken) {
+    throw new Error(data.error && data.error.message ? data.error.message : 'Firebase teacher sign-in failed.');
+  }
+  return data.idToken;
+}
+
+function firestoreBaseUrl_(projectId) {
+  return 'https://firestore.googleapis.com/v1/projects/' + encodeURIComponent(projectId) + '/databases/(default)/documents';
+}
+
+function firestoreFetch_(config, token, path, options) {
+  const res = UrlFetchApp.fetch(firestoreBaseUrl_(config.firebaseProjectId) + path, Object.assign({
+    muteHttpExceptions: true,
+    headers: { Authorization: 'Bearer ' + token },
+  }, options || {}));
+  const text = res.getContentText();
+  const data = text ? JSON.parse(text) : {};
+  if (res.getResponseCode() >= 300) {
+    throw new Error(data.error && data.error.message ? data.error.message : 'Firestore request failed.');
+  }
+  return data;
+}
+
+function firestoreRunQuery_(config, token, structuredQuery) {
+  const payload = JSON.stringify({ structuredQuery: structuredQuery });
+  const data = firestoreFetch_(config, token, ':runQuery', {
+    method: 'post',
+    contentType: 'application/json',
+    payload: payload,
+  });
+  return data
+    .map(function (row) { return row.document || null; })
+    .filter(function (doc) { return !!doc; });
+}
+
+function fsField_(doc, name) {
+  return doc && doc.fields ? doc.fields[name] : null;
+}
+
+function fsString_(doc, name) {
+  const value = fsField_(doc, name);
+  return value ? String(value.stringValue || '') : '';
+}
+
+function fsNumber_(doc, name) {
+  const value = fsField_(doc, name);
+  if (!value) return 0;
+  if (value.integerValue !== undefined) return Number(value.integerValue || 0);
+  if (value.doubleValue !== undefined) return Number(value.doubleValue || 0);
+  return 0;
+}
+
+function fsBool_(doc, name) {
+  const value = fsField_(doc, name);
+  return !!(value && value.booleanValue);
+}
+
+function firestoreQueryBalanceCandidates_(config, token, now) {
+  const docsByName = {};
+  function addDocs(docs) {
+    docs.forEach(function (doc) {
+      docsByName[doc.name] = doc;
+    });
+  }
+
+  addDocs(firestoreRunQuery_(config, token, {
+    from: [{ collectionId: 'bookings' }],
+    where: {
+      fieldFilter: {
+        field: { fieldPath: 'slot' },
+        op: 'LESS_THAN_OR_EQUAL',
+        value: { integerValue: String(now) },
+      },
+    },
+    orderBy: [{ field: { fieldPath: 'slot' }, direction: 'DESCENDING' }],
+    limit: 300,
+  }));
+
+  addDocs(firestoreRunQuery_(config, token, {
+    from: [{ collectionId: 'bookings' }],
+    where: {
+      fieldFilter: {
+        field: { fieldPath: 'status' },
+        op: 'EQUAL',
+        value: { stringValue: 'canceled' },
+      },
+    },
+    limit: 300,
+  }));
+
+  return Object.keys(docsByName).map(function (name) {
+    return docsByName[name];
+  });
+}
+
+function firestoreGetUser_(config, token, uid) {
+  return firestoreFetch_(config, token, '/users/' + encodeURIComponent(uid), { method: 'get' });
+}
+
+function firestoreCommitBalanceCharge_(config, token, bookingDoc, studentUid, newBalance, lessonPrice, reason, now) {
+  const userName = firestoreBaseUrl_(config.firebaseProjectId) + '/users/' + studentUid;
+  const bookingName = bookingDoc.name;
+  return firestoreFetch_(config, token, ':commit', {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify({
+      writes: [
+        {
+          update: {
+            name: userName,
+            fields: {
+              balance: { doubleValue: Number(newBalance) },
+              financeUpdatedAt: { integerValue: String(now) },
+              updatedAt: { timestampValue: new Date(now).toISOString() },
+            },
+          },
+          updateMask: { fieldPaths: ['balance', 'financeUpdatedAt', 'updatedAt'] },
+        },
+        {
+          update: {
+            name: bookingName,
+            fields: {
+              balanceChargedAt: { integerValue: String(now) },
+              chargedAmount: { doubleValue: Number(lessonPrice) },
+              chargeReason: { stringValue: reason },
+              updatedAt: { integerValue: String(now) },
+            },
+          },
+          updateMask: { fieldPaths: ['balanceChargedAt', 'chargedAmount', 'chargeReason', 'updatedAt'] },
+        },
+      ],
+    }),
+  });
+}
+
+function reconcileStudentBalancesFromFirestore() {
+  const config = getConfig_();
+  const token = firebaseSignIn_(config);
+  const now = Date.now();
+  const bookings = firestoreQueryBalanceCandidates_(config, token, now);
+  const users = {};
+  let chargedCount = 0;
+  let skippedCount = 0;
+  let missingPriceCount = 0;
+  let failedCount = 0;
+
+  bookings.forEach(function (bookingDoc) {
+    try {
+      const studentUid = fsString_(bookingDoc, 'studentUid');
+      const status = (fsString_(bookingDoc, 'status') || 'booked').toLowerCase();
+      const slot = fsNumber_(bookingDoc, 'slot');
+      const canceledAt = fsNumber_(bookingDoc, 'canceledAt');
+      const canceledBy = (fsString_(bookingDoc, 'canceledBy') || 'student').toLowerCase();
+      if (!studentUid || fsBool_(bookingDoc, 'balanceChargedAt') || fsNumber_(bookingDoc, 'balanceChargedAt')) {
+        skippedCount += 1;
+        return;
+      }
+
+      const shouldChargeAttended = slot <= now && (status === 'booked' || status === 'rescheduled');
+      const lateCanceled = status === 'canceled' &&
+        canceledBy === 'student' &&
+        canceledAt &&
+        slot - canceledAt < STUDENT_CHANGE_CUTOFF_MS_;
+      if (!shouldChargeAttended && !lateCanceled) {
+        skippedCount += 1;
+        return;
+      }
+
+      if (!users[studentUid]) {
+        users[studentUid] = firestoreGetUser_(config, token, studentUid);
+      }
+      const userDoc = users[studentUid];
+      const lessonPrice = fsNumber_(bookingDoc, 'lessonPrice') || fsNumber_(userDoc, 'lessonPrice');
+      if (!lessonPrice) {
+        missingPriceCount += 1;
+        return;
+      }
+      const currentBalance = fsNumber_(userDoc, 'balance');
+      const newBalance = currentBalance - lessonPrice;
+      const reason = lateCanceled ? 'late-cancel' : 'lesson';
+      firestoreCommitBalanceCharge_(config, token, bookingDoc, studentUid, newBalance, lessonPrice, reason, now);
+      users[studentUid].fields.balance = { doubleValue: Number(newBalance) };
+      chargedCount += 1;
+    } catch (err) {
+      failedCount += 1;
+    }
+  });
+
+  return {
+    success: failedCount === 0,
+    message: 'Balance reconciliation finished.',
+    checkedCount: bookings.length,
+    chargedCount: chargedCount,
+    skippedCount: skippedCount,
+    missingPriceCount: missingPriceCount,
+    failedCount: failedCount,
   };
 }
 
@@ -569,6 +791,10 @@ function handleRequest_(e) {
 
     if (action === 'sendReminderCheck') {
       return jsonOut(sendUpcomingLessonReminders());
+    }
+
+    if (action === 'reconcileBalances') {
+      return jsonOut(reconcileStudentBalancesFromFirestore());
     }
 
     return jsonOut({ success: false, message: 'Unknown action.' });

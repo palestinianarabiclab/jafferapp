@@ -702,6 +702,10 @@ main.site-shell {
     flex-wrap: wrap;
 }
 
+.booking-item__resched .form-grid {
+    width: 100%;
+}
+
 .booking-item__title {
     font-weight: 700;
 }

@@ -177,6 +177,10 @@ async function sendLessonReminderCheck() {
     return callAppsScript("sendReminderCheck", {}, { allowGet: true });
 }
 
+async function reconcileBalancesViaAppsScript() {
+    return callAppsScript("reconcileBalances", {}, { allowGet: true });
+}
+
 async function createBookingViaAppsScript(payload) {
     return callAppsScript("createBooking", payload);
 }
@@ -248,6 +252,7 @@ window.fetchBusyBlocksFromAppsScript = fetchBusyBlocksFromAppsScript;
 window.getAppsScriptEmailQuota = getAppsScriptEmailQuota;
 window.installLessonReminderTrigger = installLessonReminderTrigger;
 window.sendLessonReminderCheck = sendLessonReminderCheck;
+window.reconcileBalancesViaAppsScript = reconcileBalancesViaAppsScript;
 window.createBookingViaAppsScript = createBookingViaAppsScript;
 window.deleteBookingViaAppsScript = deleteBookingViaAppsScript;
 window.syncPendingBookingsViaAppsScript = syncPendingBookingsViaAppsScript;

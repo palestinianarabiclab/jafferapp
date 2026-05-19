@@ -36,6 +36,7 @@ export async function renderTeacherBookings({
             const data = doc.data();
             if (!data || !data.slot) return;
             if (data.slot < now) return;
+            if (String(data.status || "").toLowerCase() === "canceled") return;
             items.push({ id: doc.id, ...data });
         });
         if (!items.length) {
@@ -111,12 +112,25 @@ export async function openReschedulePanel({
         const ts = s.getTime();
         return `<option value="${ts}">${escapeHtml(s.toLocaleString())}</option>`;
     });
-    if (!options.length) {
-        resched.innerHTML = "<div class=\"small-note\">No available slots.</div>";
-        return;
-    }
     resched.innerHTML = `
-        <select class="booking-resched-select">${options.join("")}</select>
+        <div class="form-grid">
+            <label class="field">
+                <span>Available Slot</span>
+                <select class="booking-resched-select">
+                    <option value="">Choose an available slot</option>
+                    ${options.join("")}
+                </select>
+            </label>
+            <label class="field">
+                <span>Custom Date</span>
+                <input class="booking-resched-date" type="date" />
+            </label>
+            <label class="field">
+                <span>Custom Time</span>
+                <input class="booking-resched-time" type="time" />
+            </label>
+        </div>
+        ${options.length ? "" : "<div class=\"small-note\">No suggested available slots. Choose a custom date and time.</div>"}
         <button class="btn btn--primary btn--small" data-action="confirm-reschedule">Confirm</button>
         <button class="btn btn--ghost btn--small" data-action="close-reschedule">Close</button>
     `;
@@ -128,6 +142,7 @@ export async function cancelBooking({ db, firebase, bookingId }) {
             status: "canceled",
             calendarSynced: false,
             canceledAt: Date.now(),
+            canceledBy: "teacher",
             history: firebase.firestore.FieldValue.arrayUnion({
                 at: Date.now(),
                 action: "canceled",

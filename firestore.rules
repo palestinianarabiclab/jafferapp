@@ -152,6 +152,10 @@ service cloud.firestore {
             'rescheduledFrom',
             'rescheduledAt'
           ]) &&
+          (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['canceledBy']) ||
+            request.resource.data.canceledBy == "teacher"
+          ) &&
           isSafeStatus(request.resource.data.status)
       ) || (
         signedIn() &&
@@ -165,6 +169,10 @@ service cloud.firestore {
             'rescheduledFrom',
             'rescheduledAt'
           ]) &&
+          (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['canceledBy']) ||
+            request.resource.data.canceledBy == "student"
+          ) &&
           (
             request.resource.data.status == "canceled" ||
             (
@@ -225,12 +233,17 @@ service cloud.firestore {
             'googleCalendarEventId',
             'history',
             'canceledAt',
+            'canceledBy',
             'rescheduledFrom',
             'rescheduledAt',
             'balanceChargedAt',
             'chargedAmount',
             'chargeReason'
           ]) &&
+          (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['canceledBy']) ||
+            request.resource.data.canceledBy == "teacher"
+          ) &&
           isSafeStatus(request.resource.data.status)
       ) || (
         signedIn() &&
@@ -244,9 +257,14 @@ service cloud.firestore {
             'googleCalendarEventId',
             'history',
             'canceledAt',
+            'canceledBy',
             'rescheduledFrom',
             'rescheduledAt'
           ]) &&
+          (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['canceledBy']) ||
+            request.resource.data.canceledBy == "student"
+          ) &&
           (
             request.resource.data.status == "canceled" ||
             (
