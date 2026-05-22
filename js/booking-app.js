@@ -118,6 +118,7 @@ function cacheDom() {
         "studentEmail",
         "studentPassword",
         "studentAuthSubmit",
+        "studentForgotPasswordBtn",
         "studentLogoutBtn",
         "studentAuthMsg",
         "bookingStatusEmail",
@@ -146,6 +147,7 @@ function cacheDom() {
         "teacherEmail",
         "teacherPassword",
         "teacherLoginSubmit",
+        "teacherForgotPasswordBtn",
         "teacherLoginMsg",
         "teacherLogoutBtn",
         "teacherAuthBadge",
@@ -523,6 +525,24 @@ function updateStudentBalanceUi() {
     }
 }
 
+async function sendPasswordResetLink({ emailInput, statusElement, button }) {
+    if (!window.auth || typeof window.auth.sendPasswordResetEmail !== "function") {
+        setStatus(statusElement, "Firebase password reset is not available.", "error");
+        return;
+    }
+    const email = (emailInput?.value || "").trim().toLowerCase();
+    if (!email) {
+        setStatus(statusElement, "Please enter your email address first.", "error");
+        emailInput?.focus();
+        return;
+    }
+    await withButtonLoading(button, "Sending...", async () => {
+        setStatus(statusElement, "Sending password reset email...");
+        await window.auth.sendPasswordResetEmail(email);
+        setStatus(statusElement, "Password reset email sent. Check your inbox and spam/junk folder.", "success");
+    });
+}
+
 function updateBookingSubmitState() {
     if (!els.bookingSubmit) return;
     els.bookingSubmit.disabled = !state.selectedSlotMs || !isStudentSignedIn();
@@ -547,6 +567,9 @@ function setStudentAuthMode(mode) {
         } else {
             els.studentAuthSubmit.textContent = state.studentAuthMode === "signup" ? "Create Account" : "Sign In";
         }
+    }
+    if (els.studentForgotPasswordBtn) {
+        els.studentForgotPasswordBtn.hidden = state.studentAuthMode === "signup";
     }
     els.studentLoginModeBtn?.classList.toggle("btn--primary", state.studentAuthMode === "login");
     els.studentLoginModeBtn?.classList.toggle("btn--outline", state.studentAuthMode !== "login");
@@ -1321,6 +1344,18 @@ function wireStudentActions() {
     els.studentLoginModeBtn?.addEventListener("click", () => setStudentAuthMode("login"));
     els.studentSignupModeBtn?.addEventListener("click", () => setStudentAuthMode("signup"));
 
+    els.studentForgotPasswordBtn?.addEventListener("click", async (event) => {
+        try {
+            await sendPasswordResetLink({
+                emailInput: els.studentEmail,
+                statusElement: els.studentAuthMsg,
+                button: event.currentTarget,
+            });
+        } catch (error) {
+            setStatus(els.studentAuthMsg, error.message || "Could not send password reset email.", "error");
+        }
+    });
+
     els.studentAuthForm?.addEventListener("submit", async (event) => {
         event.preventDefault();
         if (!window.auth) {
@@ -2014,6 +2049,18 @@ async function savePreplyCalendarId() {
 }
 
 function wireTeacherActions() {
+    els.teacherForgotPasswordBtn?.addEventListener("click", async (event) => {
+        try {
+            await sendPasswordResetLink({
+                emailInput: els.teacherEmail,
+                statusElement: els.teacherLoginMsg,
+                button: event.currentTarget,
+            });
+        } catch (error) {
+            setStatus(els.teacherLoginMsg, error.message || "Could not send password reset email.", "error");
+        }
+    });
+
     els.teacherLoginForm?.addEventListener("submit", async (event) => {
         event.preventDefault();
         if (!window.auth) {
