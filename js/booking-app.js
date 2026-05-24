@@ -2023,6 +2023,7 @@ async function refreshGoogleCalendarStatus() {
         setStatus(els.googleCalendarStatus, "Sign in as a teacher to manage Google Calendar.");
         return;
     }
+    await ensureGoogleCalendarModuleLoaded();
     const connected = await window.isGoogleCalendarConnected?.();
     const base = connected ? "Google Calendar is connected." : "Google Calendar is not connected.";
     setStatus(els.googleCalendarStatus, [base, state.googleCalendarMessage].filter(Boolean).join(" "));
