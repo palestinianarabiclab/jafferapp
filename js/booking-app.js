@@ -1876,6 +1876,7 @@ async function refreshTeacherStudents() {
                         </div>
                         <div class="action-row">
                             <button class="btn btn--primary btn--small" type="submit" data-student-action="save">Save Student</button>
+                            <button class="btn btn--ghost btn--small" type="button" data-student-action="delete">Delete Student</button>
                         </div>
                     </form>
                 </div>
@@ -1894,6 +1895,11 @@ async function saveStudentFinance(studentId, balance, lessonPrice) {
         financeUpdatedAt: Date.now(),
         updatedAt: window.firebase.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
+}
+
+async function deleteStudentProfile(studentId) {
+    await window.db.collection("users").doc(studentId).delete();
+    state.studentCache.delete(studentId);
 }
 
 async function loadBalanceChargeCandidates(now) {
@@ -2267,10 +2273,29 @@ function wireTeacherActions() {
 
     els.teacherStudentsList?.addEventListener("click", (event) => {
         const toggle = event.target.closest("[data-student-action='toggle']");
-        if (!toggle) return;
-        const item = toggle.closest("[data-student-id]");
-        const editor = item?.querySelector("[data-student-editor]");
-        if (editor) editor.hidden = !editor.hidden;
+        if (toggle) {
+            const item = toggle.closest("[data-student-id]");
+            const editor = item?.querySelector("[data-student-editor]");
+            if (editor) editor.hidden = !editor.hidden;
+            return;
+        }
+
+        const deleteButton = event.target.closest("[data-student-action='delete']");
+        if (!deleteButton) return;
+        const item = deleteButton.closest("[data-student-id]");
+        const studentId = item?.dataset.studentId || "";
+        if (!studentId) return;
+        const student = state.studentCache.get(studentId) || {};
+        const label = student.name || student.email || "this student";
+        const confirmed = window.confirm(`Delete ${label} from Students & Balances? This removes the student profile, but existing bookings stay in the booking history.`);
+        if (!confirmed) return;
+        withButtonLoading(deleteButton, "Deleting...", async () => {
+            await deleteStudentProfile(studentId);
+            await refreshTeacherStudents();
+            setStatus(els.teacherStudentsMsg, "Student deleted.", "success");
+        }).catch((error) => {
+            setStatus(els.teacherStudentsMsg, error.message || "Could not delete student.", "error");
+        });
     });
 
     els.teacherStudentsList?.addEventListener("submit", async (event) => {

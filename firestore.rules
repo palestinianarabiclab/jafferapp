@@ -76,7 +76,7 @@ service cloud.firestore {
           'financeUpdatedAt',
           'updatedAt'
         ]));
-      allow delete: if false;
+      allow delete: if isTeacher() && resource.data.role == "student";
     }
 
     match /teachers/{uid} {
