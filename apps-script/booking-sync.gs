@@ -4,20 +4,62 @@ function jsonOut(obj) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
+function isTransientGoogleError_(err) {
+  const message = String(err && err.message ? err.message : err || '').toLowerCase();
+  return message.indexOf('service is currently unavailable') !== -1 ||
+    message.indexOf('server error occurred') !== -1 ||
+    message.indexOf('error code internal') !== -1 ||
+    message.indexOf('internal error') !== -1 ||
+    message.indexOf('backend error') !== -1 ||
+    message.indexOf('timed out') !== -1 ||
+    message.indexOf('rate limit') !== -1 ||
+    message.indexOf('too many requests') !== -1;
+}
+
+function isRetryableHttpStatus_(status) {
+  return status === 429 || status >= 500;
+}
+
+function withGoogleRetry_(label, fn) {
+  const delays = [500, 1500, 3500];
+  let lastErr = null;
+  for (let attempt = 0; attempt <= delays.length; attempt += 1) {
+    try {
+      return fn();
+    } catch (err) {
+      lastErr = err;
+      if (!isTransientGoogleError_(err) || attempt === delays.length) {
+        break;
+      }
+      Utilities.sleep(delays[attempt]);
+    }
+  }
+  throw new Error(label + ' failed after retry: ' + (lastErr && lastErr.message ? lastErr.message : lastErr));
+}
+
+function getScriptProperty_(props, name, fallback) {
+  const value = withGoogleRetry_('Read script property ' + name, function () {
+    return props.getProperty(name);
+  });
+  return value || fallback || '';
+}
+
 function getConfig_() {
-  const props = PropertiesService.getScriptProperties();
-  const preplyRaw = props.getProperty('PREPLY_CALENDAR_ID') || '';
-  const additionalRaw = props.getProperty('ADDITIONAL_CALENDAR_IDS') || '';
+  const props = withGoogleRetry_('Read script properties', function () {
+    return PropertiesService.getScriptProperties();
+  });
+  const preplyRaw = getScriptProperty_(props, 'PREPLY_CALENDAR_ID', '');
+  const additionalRaw = getScriptProperty_(props, 'ADDITIONAL_CALENDAR_IDS', '');
   return {
-    firebaseApiKey: props.getProperty('FIREBASE_API_KEY') || 'AIzaSyCfhVE4hdR5P7YW6JOAnSC5az7s-J8zEsc',
-    firebaseProjectId: props.getProperty('FIREBASE_PROJECT_ID') || 'jafferapp',
-    firebaseTeacherEmail: props.getProperty('FIREBASE_TEACHER_EMAIL') || '',
-    firebaseTeacherPassword: props.getProperty('FIREBASE_TEACHER_PASSWORD') || '',
-    primaryCalendarId: props.getProperty('PRIMARY_CALENDAR_ID') || 'primary',
+    firebaseApiKey: getScriptProperty_(props, 'FIREBASE_API_KEY', 'AIzaSyCfhVE4hdR5P7YW6JOAnSC5az7s-J8zEsc'),
+    firebaseProjectId: getScriptProperty_(props, 'FIREBASE_PROJECT_ID', 'jafferapp'),
+    firebaseTeacherEmail: getScriptProperty_(props, 'FIREBASE_TEACHER_EMAIL', ''),
+    firebaseTeacherPassword: getScriptProperty_(props, 'FIREBASE_TEACHER_PASSWORD', ''),
+    primaryCalendarId: getScriptProperty_(props, 'PRIMARY_CALENDAR_ID', 'primary'),
     preplyCalendarId: normalizeCalendarId_(preplyRaw),
     additionalCalendarIds: parseCalendarIds_(additionalRaw),
-    defaultTimeZone: props.getProperty('DEFAULT_TIMEZONE') || Session.getScriptTimeZone() || 'Africa/Cairo',
-    notificationEmail: props.getProperty('NOTIFICATION_EMAIL') || '',
+    defaultTimeZone: getScriptProperty_(props, 'DEFAULT_TIMEZONE', '') || Session.getScriptTimeZone() || 'Africa/Cairo',
+    notificationEmail: getScriptProperty_(props, 'NOTIFICATION_EMAIL', ''),
   };
 }
 
@@ -226,15 +268,21 @@ function firebaseSignIn_(config) {
     throw new Error('Missing FIREBASE_API_KEY, FIREBASE_TEACHER_EMAIL, or FIREBASE_TEACHER_PASSWORD in Script Properties.');
   }
   const url = 'https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=' + encodeURIComponent(config.firebaseApiKey);
-  const res = UrlFetchApp.fetch(url, {
-    method: 'post',
-    contentType: 'application/json',
-    muteHttpExceptions: true,
-    payload: JSON.stringify({
-      email: config.firebaseTeacherEmail,
-      password: config.firebaseTeacherPassword,
-      returnSecureToken: true,
-    }),
+  const res = withGoogleRetry_('Firebase teacher sign-in', function () {
+    const response = UrlFetchApp.fetch(url, {
+      method: 'post',
+      contentType: 'application/json',
+      muteHttpExceptions: true,
+      payload: JSON.stringify({
+        email: config.firebaseTeacherEmail,
+        password: config.firebaseTeacherPassword,
+        returnSecureToken: true,
+      }),
+    });
+    if (isRetryableHttpStatus_(response.getResponseCode())) {
+      throw new Error('Firebase teacher sign-in returned HTTP ' + response.getResponseCode() + ': ' + response.getContentText());
+    }
+    return response;
   });
   const text = res.getContentText();
   const data = text ? JSON.parse(text) : {};
@@ -249,10 +297,16 @@ function firestoreBaseUrl_(projectId) {
 }
 
 function firestoreFetch_(config, token, path, options) {
-  const res = UrlFetchApp.fetch(firestoreBaseUrl_(config.firebaseProjectId) + path, Object.assign({
-    muteHttpExceptions: true,
-    headers: { Authorization: 'Bearer ' + token },
-  }, options || {}));
+  const res = withGoogleRetry_('Firestore request ' + path, function () {
+    const response = UrlFetchApp.fetch(firestoreBaseUrl_(config.firebaseProjectId) + path, Object.assign({
+      muteHttpExceptions: true,
+      headers: { Authorization: 'Bearer ' + token },
+    }, options || {}));
+    if (isRetryableHttpStatus_(response.getResponseCode())) {
+      throw new Error('Firestore request returned HTTP ' + response.getResponseCode() + ': ' + response.getContentText());
+    }
+    return response;
+  });
   const text = res.getContentText();
   const data = text ? JSON.parse(text) : {};
   if (res.getResponseCode() >= 300) {
@@ -373,7 +427,7 @@ function firestoreCommitBalanceCharge_(config, token, bookingDoc, studentUid, ne
   });
 }
 
-function reconcileStudentBalancesFromFirestore() {
+function reconcileStudentBalancesFromFirestoreUnsafe_() {
   const config = getConfig_();
   const token = firebaseSignIn_(config);
   const now = Date.now();
@@ -435,6 +489,22 @@ function reconcileStudentBalancesFromFirestore() {
     missingPriceCount: missingPriceCount,
     failedCount: failedCount,
   };
+}
+
+function reconcileStudentBalancesFromFirestore() {
+  try {
+    return reconcileStudentBalancesFromFirestoreUnsafe_();
+  } catch (err) {
+    return {
+      success: false,
+      message: 'Balance reconciliation skipped: ' + (err && err.message ? err.message : String(err)),
+      checkedCount: 0,
+      chargedCount: 0,
+      skippedCount: 0,
+      missingPriceCount: 0,
+      failedCount: 1,
+    };
+  }
 }
 
 function parseCalendarIds_(value) {
