@@ -204,6 +204,7 @@ async function syncPendingBookingsViaAppsScript({ limit = 10 } = {}) {
         });
         let syncedCount = 0;
         let failedCount = 0;
+        const failedDetails = [];
         for (const doc of pendingDocs) {
             const booking = doc.data();
             if (!booking || !booking.slot || booking.status === "canceled") continue;
@@ -235,13 +236,19 @@ async function syncPendingBookingsViaAppsScript({ limit = 10 } = {}) {
                 syncedCount += 1;
             } else {
                 failedCount += 1;
+                const slotLabel = booking.slot
+                    ? new Date(Number(booking.slot)).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })
+                    : doc.id;
+                failedDetails.push(`${booking.name || booking.email || "Booking"} (${slotLabel}): ${result?.message || "Unknown Apps Script error"}`);
             }
         }
+        const details = failedDetails.length ? ` Details: ${failedDetails.slice(0, 3).join(" | ")}` : "";
         return {
             success: failedCount === 0,
             syncedCount,
             failedCount,
-            message: failedCount ? `Synced ${syncedCount} bookings. ${failedCount} failed.` : `Synced ${syncedCount} bookings.`,
+            failedDetails,
+            message: failedCount ? `Synced ${syncedCount} bookings. ${failedCount} failed.${details}` : `Synced ${syncedCount} bookings.`,
         };
     } catch (err) {
         return { success: false, message: err?.message || String(err), syncedCount: 0, failedCount: 0 };
