@@ -15,11 +15,6 @@ const defaultAppConfig = {
         scopes: "https://www.googleapis.com/auth/calendar.events",
         redirectUri: window.location.origin + "/",
     },
-    emailjs: {
-        publicKey: "BI-fovMoNHHS7lue5",
-        serviceId: "service_46tij1f",
-        templateId: "template_aokcxf5",
-    },
 };
 
 const appConfig = window.__APP_CONFIG__ || defaultAppConfig;
@@ -43,10 +38,4 @@ window.googleCalendarConfig = {
         "https://www.googleapis.com/auth/calendar.events",
     redirectUri:
         appConfig.googleCalendar?.redirectUri || window.location.origin + "/",
-};
-
-window.emailJsConfig = {
-    publicKey: appConfig.emailjs?.publicKey || "",
-    serviceId: appConfig.emailjs?.serviceId || "",
-    templateId: appConfig.emailjs?.templateId || "",
 };

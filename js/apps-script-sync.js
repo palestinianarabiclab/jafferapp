@@ -191,6 +191,7 @@ async function deleteBookingViaAppsScript(payload) {
 
 async function syncPendingBookingsViaAppsScript({ limit = 10 } = {}) {
     try {
+        const bookingData = await readBookingSettingsDoc();
         const snap = await window.db
             .collection("bookings")
             .where("calendarSynced", "==", false)
@@ -215,6 +216,7 @@ async function syncPendingBookingsViaAppsScript({ limit = 10 } = {}) {
                 email: booking.email || "",
                 phone: booking.phone || "",
                 notes: booking.notes || "",
+                teacherEmail: bookingData.contactEmail || "",
             });
             if (result?.success) {
                 await window.db.collection("bookings").doc(doc.id).set({

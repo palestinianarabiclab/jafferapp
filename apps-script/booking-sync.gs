@@ -44,6 +44,14 @@ function getScriptProperty_(props, name, fallback) {
   return value || fallback || '';
 }
 
+function getDefaultNotificationEmail_() {
+  try {
+    return normalizeEmail_(Session.getEffectiveUser().getEmail());
+  } catch (err) {
+    return '';
+  }
+}
+
 function getConfig_() {
   const props = withGoogleRetry_('Read script properties', function () {
     return PropertiesService.getScriptProperties();
@@ -59,7 +67,7 @@ function getConfig_() {
     preplyCalendarId: normalizeCalendarId_(preplyRaw),
     additionalCalendarIds: parseCalendarIds_(additionalRaw),
     defaultTimeZone: getScriptProperty_(props, 'DEFAULT_TIMEZONE', '') || Session.getScriptTimeZone() || 'Africa/Cairo',
-    notificationEmail: getScriptProperty_(props, 'NOTIFICATION_EMAIL', ''),
+    notificationEmail: getScriptProperty_(props, 'NOTIFICATION_EMAIL', '') || getDefaultNotificationEmail_(),
   };
 }
 

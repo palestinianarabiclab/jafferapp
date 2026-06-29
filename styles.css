@@ -550,6 +550,26 @@ main.site-shell {
     font-weight: 600;
 }
 
+.day-nav {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 10px;
+    align-items: center;
+    margin: -4px 0 14px;
+}
+
+.day-nav__label {
+    min-height: 40px;
+    display: grid;
+    place-items: center;
+    padding: 8px 12px;
+    border-radius: 14px;
+    background: rgba(15, 118, 110, 0.08);
+    color: var(--primary-dark);
+    font-weight: 700;
+    text-align: center;
+}
+
 .week-grid {
     display: grid;
     grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -613,7 +633,8 @@ main.site-shell {
 }
 
 .booking-day-empty,
-.empty-state {
+.empty-state,
+.booking-calendar-loading {
     color: var(--muted);
     font-size: 0.92rem;
 }
@@ -623,6 +644,15 @@ main.site-shell {
     border: 1px dashed rgba(91, 100, 113, 0.28);
     border-radius: 18px;
     margin-top: 14px;
+}
+
+.booking-calendar-loading {
+    grid-column: 1 / -1;
+    padding: 22px;
+    border: 1px dashed rgba(91, 100, 113, 0.24);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.62);
+    text-align: center;
 }
 
 .selection-card {
@@ -1076,6 +1106,10 @@ main.site-shell {
         display: grid;
     }
 
+    .day-nav {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
     .welcome-gate {
         min-height: auto;
         padding: 18px 0 38px;
@@ -1110,16 +1144,13 @@ main.site-shell {
     }
 
     .week-grid {
-        display: flex;
-        grid-template-columns: none;
+        display: grid;
+        grid-template-columns: 1fr;
         gap: 14px;
-        overflow-x: auto;
-        margin: 0 -20px;
-        padding: 4px 20px 16px;
-        scroll-padding: 20px;
-        scroll-snap-type: x mandatory;
-        scrollbar-width: thin;
-        -webkit-overflow-scrolling: touch;
+        overflow: visible;
+        margin: 0;
+        padding: 0;
+        scroll-snap-type: none;
     }
 
     .reschedule-grid {
@@ -1169,14 +1200,13 @@ main.site-shell {
     }
 
     .booking-day-column {
-        display: block;
-        flex: 0 0 min(88vw, 360px);
+        display: none;
+        flex: none;
         min-height: auto;
         padding: 18px;
         border-radius: 24px;
         background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 242, 233, 0.96));
         box-shadow: 0 14px 28px rgba(31, 41, 55, 0.1);
-        scroll-snap-align: start;
     }
 
     .booking-day-column.is-focused {

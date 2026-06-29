@@ -64,7 +64,6 @@ export async function submitGuestBooking({
     refreshCalendarAvailability,
     buildBookingSelects,
     hashEmail,
-    sendBookingEmail,
     createBookingViaAppsScript,
     loadBookingStatus,
     isLocalDevHost,
@@ -203,6 +202,7 @@ export async function submitGuestBooking({
             appsScriptMessage = appsScriptSync.message || "";
         } else {
             appsScriptMessage = appsScriptSync?.message || "";
+            throw new Error(appsScriptMessage || "Could not create the booking in Google Calendar. Please try again.");
         }
 
         await bookingRef.set({
@@ -246,64 +246,6 @@ export async function submitGuestBooking({
             calendarSynced,
             source: "student",
         });
-
-        const emailSummary = [
-            `Student: ${name}`,
-            `Email: ${email}`,
-            `Phone: ${phone}`,
-            reason ? `Reasons: ${reason}` : "",
-            level ? `Level: ${level}` : "",
-            lessonsPerMonth ? `Lessons/month: ${lessonsPerMonth}` : "",
-            `Student timezone: ${studentTimeZone || "-"}`,
-            `Student locale: ${studentLocale || "-"}`,
-            `Country hint: ${countryHint || "-"}`,
-            `Teacher timezone: ${bookingSettings.timezone || getLocalTimezone() || "-"}`,
-            `Selected time: ${slot}`,
-            notes ? `Notes: ${notes}` : "",
-        ].filter(Boolean).join("\n");
-
-        if (!teacherEmailSent && !appsScriptSucceeded) {
-            teacherEmailSent = await sendBookingEmail({
-                recipientEmail: (contactSettings?.email || "").trim(),
-                name,
-                email,
-                phone,
-                notes: combinedNotes,
-                slot,
-                studentTimeZone,
-                studentLocale,
-                teacherTimeZone: bookingSettings.timezone || getLocalTimezone() || "",
-                reasons: reason,
-                level,
-                lessonsPerMonth,
-                countryHint,
-                summary: emailSummary,
-            });
-            if (!teacherEmailSent && !teacherEmailError) {
-                teacherEmailError = "Fallback teacher email via EmailJS failed.";
-            }
-        }
-        if (!studentEmailSent && !appsScriptSucceeded) {
-            studentEmailSent = await sendBookingEmail({
-                recipientEmail: email,
-                name,
-                email,
-                phone,
-                notes: `Your lesson has been booked successfully.\nBooking time: ${slot}\nTeacher timezone: ${bookingSettings.timezone || getLocalTimezone() || ""}\nBooking ID: ${bookingRef.id}`,
-                slot,
-                studentTimeZone,
-                studentLocale,
-                teacherTimeZone: bookingSettings.timezone || getLocalTimezone() || "",
-                reasons: "",
-                level: "",
-                lessonsPerMonth: "",
-                countryHint,
-                summary: `Booking confirmed for ${name} at ${slot}.`,
-            });
-            if (!studentEmailSent && !studentEmailError) {
-                studentEmailError = "Fallback student email via EmailJS failed.";
-            }
-        }
 
         if (bookingMsg) {
             if (teacherEmailSent && (studentEmailSent || studentCalendarInviteSent)) {

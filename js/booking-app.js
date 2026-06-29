@@ -92,6 +92,9 @@ function cacheDom() {
         "bookingWeekPrev",
         "bookingWeekNext",
         "bookingWeekLabel",
+        "bookingDayPrev",
+        "bookingDayNext",
+        "bookingDayLabel",
         "bookingWeeklyGrid",
         "bookingEmptyState",
         "bookingInfo",
@@ -169,6 +172,7 @@ function cacheDom() {
         "appsScriptMsg",
         "appsScriptTestBtn",
         "appsScriptRefreshBusyBtn",
+        "appsScriptSyncPendingBtn",
         "appsScriptQuotaBtn",
         "appsScriptInstallReminderBtn",
         "appsScriptReminderCheckBtn",
@@ -218,46 +222,6 @@ function escapeHtml(value) {
 function isLocalDevHost() {
     const host = window.location.hostname || "";
     return host === "localhost" || host === "127.0.0.1" || host === "";
-}
-
-function ensureEmailJsInit() {
-    const cfg = window.emailJsConfig || {};
-    if (!cfg.publicKey) return false;
-    try {
-        if (window.emailjs && typeof window.emailjs.init === "function") {
-            window.emailjs.init(cfg.publicKey);
-            return true;
-        }
-    } catch {}
-    return false;
-}
-
-async function sendBookingEmail(payload) {
-    const cfg = window.emailJsConfig || {};
-    if (!cfg.publicKey || !cfg.serviceId || !cfg.templateId) return false;
-    if (!ensureEmailJsInit()) return false;
-
-    try {
-        await window.emailjs.send(cfg.serviceId, cfg.templateId, {
-            to_email: (payload.recipientEmail || "").trim(),
-            student_name: payload.name || "",
-            student_email: payload.email || "",
-            student_phone: payload.phone || "",
-            slot_time: payload.slot || "",
-            notes: payload.notes || "",
-            student_timezone: payload.studentTimeZone || "",
-            student_locale: payload.studentLocale || "",
-            teacher_timezone: payload.teacherTimeZone || "",
-            booking_reasons: payload.reasons || "",
-            booking_level: payload.level || "",
-            booking_lessons_per_month: payload.lessonsPerMonth || "",
-            booking_country_hint: payload.countryHint || "",
-            booking_summary: payload.summary || "",
-        });
-        return true;
-    } catch {
-        return false;
-    }
 }
 
 function loadScriptOnce(src) {
@@ -440,6 +404,11 @@ function formatDateKey(dateKey, options = {}) {
         ...options,
         timeZone: getDisplayTimezone(),
     });
+}
+
+function formatWeekRangeLabel(offset, startKey, endKey) {
+    const label = offset === 0 ? "This week" : offset === 1 ? "Next week" : `In ${offset} weeks`;
+    return `${label} · ${formatDateKey(startKey, { month: "short", day: "numeric" })} - ${formatDateKey(endKey, { month: "short", day: "numeric" })}`;
 }
 
 function getCustomTeacherSlotMs(item) {
@@ -651,6 +620,68 @@ function syncBookingGridSelection() {
     document.querySelectorAll(".booking-day-column").forEach((column) => {
         column.classList.toggle("is-focused", column.dataset.dateKey === state.visibleDateKey);
     });
+    updateBookingDayControls();
+}
+
+function updateBookingDayControls() {
+    if (!state.visibleDateKey) return;
+    const timezone = getDisplayTimezone();
+    const weekStartDateKey = getScheduleStartDateKey(state.bookingWeekOffset, timezone);
+    if (els.bookingDayLabel) {
+        els.bookingDayLabel.textContent = formatDateKey(state.visibleDateKey, {
+            weekday: "long",
+            month: "short",
+            day: "numeric",
+        });
+    }
+    if (els.bookingDayPrev) {
+        els.bookingDayPrev.disabled = state.bookingWeekOffset === 0 && state.visibleDateKey === weekStartDateKey;
+    }
+}
+
+function setVisibleBookingDate(dateKey) {
+    if (!dateKey) return;
+    state.visibleDateKey = dateKey;
+    const timezone = getDisplayTimezone();
+    const weekStartDateKey = getScheduleStartDateKey(state.bookingWeekOffset, timezone);
+    for (let i = 0; i < 7; i += 1) {
+        if (addDaysToDateKey(weekStartDateKey, i) === dateKey) {
+            syncBookingGridSelection();
+            return;
+        }
+    }
+}
+
+async function moveVisibleBookingDay(direction) {
+    const timezone = getDisplayTimezone();
+    const currentWeekStartKey = getScheduleStartDateKey(state.bookingWeekOffset, timezone);
+    const currentKey = state.visibleDateKey || currentWeekStartKey;
+    let nextKey = addDaysToDateKey(currentKey, direction);
+    const currentWeekEndKey = addDaysToDateKey(currentWeekStartKey, 6);
+
+    if (direction < 0 && nextKey < currentWeekStartKey) {
+        if (state.bookingWeekOffset === 0) return;
+        state.bookingWeekOffset = Math.max(0, state.bookingWeekOffset - 1);
+        const newWeekStartKey = getScheduleStartDateKey(state.bookingWeekOffset, timezone);
+        nextKey = addDaysToDateKey(newWeekStartKey, 6);
+        state.visibleDateKey = nextKey;
+        showBookingCalendarLoading();
+        await refreshRuntimeBusyBlocks();
+        await renderBookingCalendar();
+        return;
+    }
+
+    if (direction > 0 && nextKey > currentWeekEndKey) {
+        state.bookingWeekOffset += 1;
+        const newWeekStartKey = getScheduleStartDateKey(state.bookingWeekOffset, timezone);
+        state.visibleDateKey = newWeekStartKey;
+        showBookingCalendarLoading();
+        await refreshRuntimeBusyBlocks();
+        await renderBookingCalendar();
+        return;
+    }
+
+    setVisibleBookingDate(nextKey);
 }
 
 function bookingDeps() {
@@ -715,6 +746,7 @@ async function refreshRuntimeBusyBlocksNow({ force = false, minDays = 0 } = {}) 
 }
 
 async function refreshGoogleBusyAndCalendar({ silent = true } = {}) {
+    showBookingCalendarLoading("Refreshing available times...");
     await refreshRuntimeBusyBlocks();
     await renderBookingCalendar();
     if (!silent) {
@@ -774,6 +806,7 @@ async function ensureBookingCalendarLoaded({ force = false } = {}) {
         await state.bookingCalendarInFlight;
         return;
     }
+    showBookingCalendarLoading();
     state.bookingCalendarInFlight = (async () => {
         await Promise.all([
             loadPublicSettings({ force }),
@@ -845,8 +878,9 @@ async function renderBookingCalendar() {
 
     if (els.bookingWeekLabel) {
         const weekLabelEndKey = addDaysToDateKey(weekStartDateKey, 6);
-        els.bookingWeekLabel.textContent = `${formatDateKey(weekStartDateKey, { month: "short", day: "numeric" })} - ${formatDateKey(weekLabelEndKey, { month: "short", day: "numeric" })}`;
+        els.bookingWeekLabel.textContent = formatWeekRangeLabel(state.bookingWeekOffset, weekStartDateKey, weekLabelEndKey);
     }
+    updateBookingDayControls();
 
     if (!els.bookingWeeklyGrid) return;
     els.bookingWeeklyGrid.innerHTML = "";
@@ -904,6 +938,15 @@ async function renderBookingCalendar() {
     if (state.selectedSlotMs) {
         const stillAvailable = schedule.some((slot) => slot.available && slot.startMs === state.selectedSlotMs);
         if (!stillAvailable) setSelectedSlot(null);
+    }
+}
+
+function showBookingCalendarLoading(message = "Loading available times...") {
+    if (els.bookingWeeklyGrid) {
+        els.bookingWeeklyGrid.innerHTML = `<div class="booking-calendar-loading">${escapeHtml(message)}</div>`;
+    }
+    if (els.bookingEmptyState) {
+        els.bookingEmptyState.hidden = true;
     }
 }
 
@@ -1211,7 +1254,7 @@ async function renderRescheduleModalSlots() {
     const startKey = getScheduleStartDateKey(offset, timezone);
     const endKey = addDaysToDateKey(startKey, 6);
     if (els.rescheduleWeekLabel) {
-        els.rescheduleWeekLabel.textContent = `${formatDateKey(startKey, { month: "short", day: "numeric" })} - ${formatDateKey(endKey, { month: "short", day: "numeric" })}`;
+        els.rescheduleWeekLabel.textContent = formatWeekRangeLabel(offset, startKey, endKey);
     }
 
     await refreshRuntimeBusyBlocks({ minDays: (offset + 1) * 7 + 1 });
@@ -1420,6 +1463,8 @@ function wireStudentActions() {
     els.bookingWeekPrev?.addEventListener("click", (event) => {
         withButtonLoading(event.currentTarget, "Loading...", async () => {
             state.bookingWeekOffset = Math.max(0, state.bookingWeekOffset - 1);
+            state.visibleDateKey = "";
+            showBookingCalendarLoading();
             await refreshRuntimeBusyBlocks();
             await renderBookingCalendar();
         }).catch(console.error);
@@ -1428,9 +1473,19 @@ function wireStudentActions() {
     els.bookingWeekNext?.addEventListener("click", (event) => {
         withButtonLoading(event.currentTarget, "Loading...", async () => {
             state.bookingWeekOffset += 1;
+            state.visibleDateKey = "";
+            showBookingCalendarLoading();
             await refreshRuntimeBusyBlocks();
             await renderBookingCalendar();
         }).catch(console.error);
+    });
+
+    els.bookingDayPrev?.addEventListener("click", (event) => {
+        withButtonLoading(event.currentTarget, "Loading...", () => moveVisibleBookingDay(-1)).catch(console.error);
+    });
+
+    els.bookingDayNext?.addEventListener("click", (event) => {
+        withButtonLoading(event.currentTarget, "Loading...", () => moveVisibleBookingDay(1)).catch(console.error);
     });
 
     els.bookingStatusBtn?.addEventListener("click", (event) => {
@@ -1667,7 +1722,6 @@ function wireStudentActions() {
             },
             buildBookingSelects: renderBookingCalendar,
             hashEmail,
-            sendBookingEmail,
             createBookingViaAppsScript: window.createBookingViaAppsScript,
             loadBookingStatus,
             isLocalDevHost,
@@ -2177,6 +2231,12 @@ function wireTeacherActions() {
         setStatus(els.appsScriptMsg, state.runtimeBusyBlocks.length
             ? `Loaded ${state.runtimeBusyBlocks.length} busy blocks from Apps Script.`
             : "Apps Script busy blocks refreshed.", "success");
+    });
+
+    els.appsScriptSyncPendingBtn?.addEventListener("click", async (event) => {
+        const result = await withButtonLoading(event.currentTarget, "Syncing...", () => window.syncPendingBookingsViaAppsScript?.({ limit: 25 }));
+        setStatus(els.appsScriptMsg, result?.message || "Pending booking sync finished.", result?.success ? "success" : "error");
+        await refreshTeacherBookings();
     });
 
     els.appsScriptQuotaBtn?.addEventListener("click", (event) => {

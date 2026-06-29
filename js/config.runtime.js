@@ -15,9 +15,4 @@ window.__APP_CONFIG__ = {
         scopes: "https://www.googleapis.com/auth/calendar.events",
         redirectUri: window.location.origin + "/",
     },
-    emailjs: {
-        publicKey: "BI-fovMoNHHS7lue5",
-        serviceId: "service_46tij1f",
-        templateId: "template_aokcxf5",
-    },
 };
