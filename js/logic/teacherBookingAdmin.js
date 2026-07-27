@@ -11,13 +11,24 @@ export async function renderTeacherBookings({
     try {
         const managementStart = Date.now() - 3600000;
         const calendarHistoryStart = Date.now() - 60 * 24 * 60 * 60 * 1000;
-        let snap;
+        let upcomingSnap;
+        let historySnap;
         try {
-            snap = await db
+            // Query upcoming lessons separately. A limited ascending history query
+            // can fill with old lessons and omit a newly-created lesson everywhere
+            // that consumes bookingCache (management, calendar and teacher banner).
+            upcomingSnap = await db
                 .collection("bookings")
-                .where("slot", ">=", calendarHistoryStart)
+                .where("slot", ">=", managementStart)
                 .orderBy("slot")
                 .limit(100)
+                .get();
+            historySnap = await db
+                .collection("bookings")
+                .where("slot", ">=", calendarHistoryStart)
+                .where("slot", "<", managementStart)
+                .orderBy("slot", "desc")
+                .limit(50)
                 .get();
         } catch (queryError) {
             const code = queryError?.code || "";
@@ -26,19 +37,24 @@ export async function renderTeacherBookings({
             if (!needsIndex) {
                 throw queryError;
             }
-            snap = await db
+            const fallbackSnap = await db
                 .collection("bookings")
-                .orderBy("slot")
-                .limit(100)
+                .orderBy("slot", "desc")
+                .limit(150)
                 .get();
+            upcomingSnap = fallbackSnap;
+            historySnap = null;
         }
-        const items = [];
-        snap.forEach((doc) => {
+        const itemsById = new Map();
+        const collectBooking = (doc) => {
             const data = doc.data();
             if (!data || !data.slot) return;
             if (data.slot < calendarHistoryStart) return;
-            items.push({ id: doc.id, ...data });
-        });
+            itemsById.set(doc.id, { id: doc.id, ...data });
+        };
+        upcomingSnap?.forEach(collectBooking);
+        historySnap?.forEach(collectBooking);
+        const items = Array.from(itemsById.values()).sort((a, b) => Number(a.slot) - Number(b.slot));
         items.forEach((booking) => {
             bookingCache.set(booking.id, booking);
         });
@@ -67,6 +83,9 @@ export async function renderTeacherBookings({
                     : status === "rescheduled"
                         ? "rescheduled"
                         : "booked";
+                const lessonTypeLabel = b.source === "teacher"
+                    ? `<div class="booking-item__type booking-item__type--private">Private lesson</div>`
+                    : "";
                 const rescheduledFrom = b.rescheduledFrom
                     ? `<div class="booking-item__meta">From: ${escapeHtml(formatSlotTime(b.rescheduledFrom))}</div>`
                     : "";
@@ -87,6 +106,7 @@ export async function renderTeacherBookings({
                             <div class="booking-item__time">${escapeHtml(formatSlotTime(b.slot))}</div>
                             ${rescheduledFrom}
                             <div class="${statusClass}">${escapeHtml(statusLabel)}</div>
+                            ${lessonTypeLabel}
                             ${lateLabel}
                         </div>
                         <div class="booking-item__actions" style="display: flex; flex-wrap: wrap; gap: 6px;">

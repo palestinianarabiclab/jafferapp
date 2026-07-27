@@ -864,6 +864,21 @@ main.site-shell {
     color: var(--accent);
 }
 
+.booking-item__type {
+    display: inline-flex;
+    width: fit-content;
+    margin-left: 6px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 800;
+}
+
+.booking-item__type--private {
+    color: #6b21a8;
+    background: #f3e8ff;
+}
+
 .student-admin-list {
     display: grid;
     gap: 12px;
@@ -3304,6 +3319,19 @@ main.site-shell {
 .teacher-calendar-event.is-trial {
     background: #fce7f3;
     border-color: #db2777;
+}
+
+.teacher-calendar-event.is-private,
+.teacher-agenda-item.is-private {
+    color: #581c87;
+    background: #f3e8ff;
+    border-color: #9333ea;
+}
+
+.booking-status-item-card.is-private-lesson {
+    background: #faf5ff;
+    border-color: #c084fc;
+    box-shadow: inset 4px 0 0 #9333ea;
 }
 
 .teacher-calendar-event.is-busy {

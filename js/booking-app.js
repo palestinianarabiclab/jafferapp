@@ -1880,11 +1880,11 @@ async function loadStudentBookings() {
                     : "";
 
                 return `
-                    <div class="booking-status-item-card" data-student-booking-id="${escapeHtml(b.id)}">
+                    <div class="booking-status-item-card${b.source === "teacher" ? " is-private-lesson" : ""}" data-student-booking-id="${escapeHtml(b.id)}">
                         <div>
                             <strong style="font-size: 0.95rem; color: var(--ink);">${escapeHtml(formatSlotTime(b.slot))}</strong>
                             <div style="font-size: 0.8rem; margin-top: 4px; display: flex; align-items: center; gap: 6px;">
-                                <span style="background: rgba(15, 118, 110, 0.12); color: var(--primary-dark); padding: 3px 8px; border-radius: 6px; font-weight: 700; font-size: 0.72rem; border: 1px solid rgba(15, 118, 110, 0.2);">${escapeHtml(label)}</span>
+                                <span style="background: rgba(15, 118, 110, 0.12); color: var(--primary-dark); padding: 3px 8px; border-radius: 6px; font-weight: 700; font-size: 0.72rem; border: 1px solid rgba(15, 118, 110, 0.2);">${escapeHtml(b.source === "teacher" ? "Private lesson" : label)}</span>
                             </div>
                         </div>
                         ${teacherNotice}
@@ -5345,7 +5345,7 @@ function renderTeacherWeekCalendar() {
             startMs: slot,
             durationMinutes,
             label: booking.name || booking.studentName || booking.email || "Student lesson",
-            type: booking.isFreeTrial ? "trial" : "confirmed",
+            type: booking.isFreeTrial ? "trial" : (booking.source === "teacher" ? "private" : "confirmed"),
             studentTimezone: booking.studentTimeZone || "",
         });
     });
