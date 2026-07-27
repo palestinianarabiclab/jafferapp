@@ -111,6 +111,7 @@ const state = {
     teacherLessonFeedbackUnsubscribe: null,
     teacherLessonFeedbackRefreshTimer: null,
     teacherLessonFeedbackLoaded: false,
+    preplyStatisticsSyncTimer: null,
     busyRefreshInFlight: null,
     googleCalendarModuleLoading: null,
     publicSettingsLoaded: false,
@@ -3278,7 +3279,14 @@ async function openClassroomDirectly(booking) {
         return;
     }
     let url = getClassroomMeetingUrl(booking);
+    let lessonTab = null;
     if (!url) {
+        lessonTab = window.open("about:blank", "_blank");
+        if (!lessonTab) {
+            window.alert("Your browser blocked the lesson tab. Allow pop-ups for this site, then click Join Lesson again.");
+            return;
+        }
+        lessonTab.opener = null;
         setAppLoading(true, "Preparing your Google Meet room...");
         try {
             url = await recoverClassroomMeetingUrl(booking);
@@ -3286,11 +3294,19 @@ async function openClassroomDirectly(booking) {
             setAppLoading(false);
         }
         if (!url) {
+            lessonTab.close();
             window.alert("The Google Meet room could not be prepared. Ask the teacher to sync this booking from the calendar settings.");
             return;
         }
     }
-    window.location.assign(url);
+    if (lessonTab) {
+        lessonTab.location.replace(url);
+        return;
+    }
+    const opened = window.open(url, "_blank", "noopener,noreferrer");
+    if (!opened) {
+        window.alert("Your browser blocked the lesson tab. Allow pop-ups for this site, then click Join Lesson again.");
+    }
 }
 
 function openClassroomModal(booking) {
@@ -5067,6 +5083,7 @@ async function syncPreplyStatistics() {
     const currentStudents = parseProfileCounter(state.profileSettings?.studentsCount, 85);
     const now = Date.now();
     const calendarStatistics = {
+        ...previous,
         initialized: true,
         processedEventIds: Array.from(new Set([...existingEventIds, ...currentEventIds])).slice(-5000),
         knownStudentKeys: Array.from(new Set([...existingStudentKeys, ...currentStudentKeys])).slice(-5000),
@@ -5176,6 +5193,25 @@ async function syncPlatformStatistics() {
         newLessons: newLessonIds.length,
         newStudents: newStudentKeys.length,
     };
+}
+
+function stopPreplyStatisticsAutoSync() {
+    if (!state.preplyStatisticsSyncTimer) return;
+    window.clearInterval(state.preplyStatisticsSyncTimer);
+    state.preplyStatisticsSyncTimer = null;
+}
+
+function startPreplyStatisticsAutoSync() {
+    stopPreplyStatisticsAutoSync();
+    if (!state.teacherUser || state.teacherRole !== "teacher") return;
+    state.preplyStatisticsSyncTimer = window.setInterval(() => {
+        if (document.hidden || !state.teacherUser || state.teacherRole !== "teacher") return;
+        syncPreplyStatistics()
+            .then(() => syncPlatformStatistics())
+            .catch((error) => {
+            console.warn("Automatic completed-lesson statistics sync failed.", error);
+        });
+    }, 60 * 60 * 1000);
 }
 
 function updateSystemSyncStatusIndicator() {
@@ -6625,6 +6661,7 @@ function wireTeacherActions() {
                     : `Preply statistics synced: +${syncResult.newLessons} lessons, +${syncResult.newStudents} students.`,
                 "success"
             );
+            startPreplyStatisticsAutoSync();
         } catch (error) {
             setStatus(els.appsScriptMsg, error.message || "Could not sync Preply statistics.", "error");
         }
@@ -7341,6 +7378,7 @@ async function handleAuthState(user) {
     stopStudentBookingsListener();
     stopBalanceReconcileAutoRefresh();
     stopTeacherLessonFeedbackListener();
+    stopPreplyStatisticsAutoSync();
     state.currentUser = user || null;
     state.currentRole = "";
     state.studentProfile = null;
@@ -7461,6 +7499,14 @@ async function handleAuthState(user) {
         if (els.teacherAppsScriptUrl) els.teacherAppsScriptUrl.value = teacherData.appsScript?.webAppUrl || "";
         if (els.teacherPreplyCalendarId) {
             els.teacherPreplyCalendarId.value = teacherData.preplyCalendarId || teacherData.googleCalendar?.preplyCalendarId || "";
+        }
+        if (teacherData.calendarStatistics?.initialized === true) {
+            syncPreplyStatistics()
+                .then(() => syncPlatformStatistics())
+                .catch((error) => {
+                console.warn("Initial completed-lesson statistics refresh failed.", error);
+            });
+            startPreplyStatisticsAutoSync();
         }
     }).catch((error) => console.warn("Could not load teacher integration settings.", error));
 
