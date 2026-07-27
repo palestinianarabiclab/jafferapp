@@ -1213,7 +1213,7 @@ async function loadPublicSettings({ force = false } = {}) {
 function updateStudentOfferUi() {
     const offers = state.bookingSettings.courseOffers || {};
     const lessonPrice = toMoneyValue(offers.courseAccessPrice || 20) || 20;
-    const rateText = `Regular rate: $${lessonPrice} / 50 min`;
+    const rateText = `Regular rate: $20 / 50 min`;
     const lessonRateDisplay = document.getElementById("lessonRateDisplay");
     if (lessonRateDisplay) lessonRateDisplay.textContent = rateText;
     if (els.preplyRateDisplay && !state.profileSettings?.rateText) {
