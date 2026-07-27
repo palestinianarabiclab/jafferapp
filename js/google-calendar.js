@@ -618,7 +618,8 @@ window.importGoogleCalendarEventsToBusyBlocks = async function importGoogleCalen
             bookingRef.set({ bookingSettings: nextBookingSettings }, { merge: true }),
             firebase.firestore().collection("bookingSettings").doc("primary").set({
                 exceptions,
-                updatedAt: syncTime
+                updatedAt: syncTime,
+                lastGoogleSync: syncTime
             }, { merge: true })
         ]);
         window.bookingSettings = { ...window.bookingSettings, exceptions, lastGoogleSync: syncTime };

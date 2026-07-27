@@ -58,15 +58,21 @@ function getConfig_() {
   });
   const preplyRaw = getScriptProperty_(props, 'PREPLY_CALENDAR_ID', '');
   const additionalRaw = getScriptProperty_(props, 'ADDITIONAL_CALENDAR_IDS', '');
+  const firebaseTeacherEmail = normalizeEmail_(getScriptProperty_(props, 'FIREBASE_TEACHER_EMAIL', 'jaffer.murtaja@gmail.com'));
+  const notificationEmail = normalizeEmail_(
+    getScriptProperty_(props, 'NOTIFICATION_EMAIL', '') ||
+    getDefaultNotificationEmail_() ||
+    firebaseTeacherEmail
+  );
   return {
     firebaseApiKey: getScriptProperty_(props, 'FIREBASE_API_KEY', 'AIzaSyCfhVE4hdR5P7YW6JOAnSC5az7s-J8zEsc'),
     firebaseProjectId: getScriptProperty_(props, 'FIREBASE_PROJECT_ID', 'jafferapp'),
-    firebaseTeacherEmail: normalizeEmail_(getScriptProperty_(props, 'FIREBASE_TEACHER_EMAIL', 'jaffer.murtaja@gmail.com')),
+    firebaseTeacherEmail: firebaseTeacherEmail,
     primaryCalendarId: getScriptProperty_(props, 'PRIMARY_CALENDAR_ID', 'primary'),
     preplyCalendarId: normalizeCalendarId_(preplyRaw),
     additionalCalendarIds: parseCalendarIds_(additionalRaw),
     defaultTimeZone: getScriptProperty_(props, 'DEFAULT_TIMEZONE', '') || Session.getScriptTimeZone() || 'Africa/Cairo',
-    notificationEmail: getScriptProperty_(props, 'NOTIFICATION_EMAIL', '') || getDefaultNotificationEmail_(),
+    notificationEmail: notificationEmail,
   };
 }
 
@@ -280,67 +286,39 @@ function cleanupLegacyScriptProperties() {
 }
 
 function sendUpcomingLessonReminders() {
-  const config = getConfig_();
-  const cal = CalendarApp.getCalendarById(config.primaryCalendarId);
-  if (!cal) {
-    return { success: false, message: 'Primary calendar not found.', sentCount: 0 };
-  }
-
-  const now = new Date();
-  const start = new Date(now.getTime() + 5 * 60 * 1000);
-  const end = new Date(now.getTime() + 20 * 60 * 1000);
-  const events = cal.getEvents(start, end).filter(function (event) {
-    return (event.getDescription() || '').indexOf('Booking ID:') !== -1;
-  });
-  const props = PropertiesService.getScriptProperties();
-  const reminderHistory = getReminderHistory_(props);
-  let sentCount = 0;
-  let skippedCount = 0;
-  let failedCount = 0;
-
-  events.forEach(function (event) {
-    const details = parseEventDetails_(event, config);
-    const key = getReminderKey_(event, details);
-    if (reminderHistory[key]) {
-      skippedCount += 1;
-      return;
-    }
-    if (!isValidEmail_(details.email)) {
-      failedCount += 1;
-      return;
-    }
-    try {
-      const sent = sendLessonReminderEmail_(details.email, details);
-      if (sent) {
-        reminderHistory[key] = Date.now();
-        sentCount += 1;
-      } else {
-        failedCount += 1;
-      }
-    } catch (err) {
-      failedCount += 1;
+  ScriptApp.getProjectTriggers().forEach(function (trigger) {
+    if (trigger.getHandlerFunction() === 'sendUpcomingLessonReminders') {
+      ScriptApp.deleteTrigger(trigger);
     }
   });
-
-  saveReminderHistory_(props, reminderHistory);
-
   return {
-    success: failedCount === 0,
-    message: 'Reminder check finished.',
-    sentCount: sentCount,
-    skippedCount: skippedCount,
-    failedCount: failedCount,
-    checkedCount: events.length,
-    windowStart: start.getTime(),
-    windowEnd: end.getTime(),
+    success: true,
+    message: 'Legacy email reminder trigger removed. Google Calendar sends the built-in 15-minute reminder.',
+    sentCount: 0,
+    skippedCount: 0,
+    failedCount: 0,
+    checkedCount: 0,
   };
 }
 
 function installLessonReminderTrigger() {
   return {
-    success: false,
-    manualSetupRequired: true,
-    message: 'Create the reminder trigger manually in Apps Script: Triggers > Add Trigger > sendUpcomingLessonReminders > Time-driven > Minutes timer > Every 5 minutes.',
+    success: true,
+    manualSetupRequired: false,
+    message: 'No reminder trigger is required. Google Calendar sends the built-in 15-minute reminder.',
+  };
+}
+
+function reconcileStudentBalancesFromFirestore() {
+  ScriptApp.getProjectTriggers().forEach(function (trigger) {
+    if (trigger.getHandlerFunction() === 'reconcileStudentBalancesFromFirestore') {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+  return {
+    success: true,
+    skipped: true,
+    message: 'Legacy balance reconciliation trigger removed. Balances are managed by authenticated booking transactions.'
   };
 }
 
@@ -1054,19 +1032,21 @@ function handleRequest_(e) {
       } catch (mailErr) {
         notificationError = mailErr && mailErr.message ? mailErr.message : String(mailErr);
       }
-      try {
-        studentConfirmationSent = sendStudentConfirmationEmail_(email, {
-          name: name,
-          bookingId: bookingId,
-          timeZone: timeZone,
-          slotLabel: slotLabel,
-          meetingUrl: meetingUrl
-        });
-        if (!studentConfirmationSent) {
-          studentConfirmationError = email ? 'Student confirmation email was not accepted.' : 'Student email is missing.';
+      if (!calendarInviteSent) {
+        try {
+          studentConfirmationSent = sendStudentConfirmationEmail_(email, {
+            name: name,
+            bookingId: bookingId,
+            timeZone: timeZone,
+            slotLabel: slotLabel,
+            meetingUrl: meetingUrl
+          });
+          if (!studentConfirmationSent) {
+            studentConfirmationError = email ? 'Student confirmation email was not accepted.' : 'Student email is missing.';
+          }
+        } catch (mailErr) {
+          studentConfirmationError = mailErr && mailErr.message ? mailErr.message : String(mailErr);
         }
-      } catch (mailErr) {
-        studentConfirmationError = mailErr && mailErr.message ? mailErr.message : String(mailErr);
       }
       return jsonOut({
         success: true,

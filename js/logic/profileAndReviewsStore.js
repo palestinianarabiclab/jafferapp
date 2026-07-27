@@ -787,7 +787,7 @@ export async function loadCloudReviews(db, defaultReviews) {
         const snap = await db
             .collection("reviews")
             .where("source", "==", "Student Review")
-            .limit(100)
+            .limit(50)
             .get();
         if (!snap.empty) {
             const items = [];

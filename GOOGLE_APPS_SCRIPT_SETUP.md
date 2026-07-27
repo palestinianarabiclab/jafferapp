@@ -62,32 +62,13 @@ In your site:
 3. Click `Save Apps Script URL`
 4. Click `Test Apps Script`
 5. Click `Import Busy via Apps Script`
-6. Create the reminder trigger manually in Apps Script to send student reminder emails about 15 minutes before each lesson
+6. Do not create a reminder trigger. Each lesson’s Google Calendar event contains its own 15-minute reminder.
 
 After changing `apps-script/booking-sync.gs`, create a new Apps Script deployment version, then keep the same Web App URL in the dashboard unless Google gives you a new one.
 
 ## 5. Lesson Reminders
 
-The script supports two reminder paths:
-
-- New Google Calendar events get a 15-minute popup/email reminder.
-- A time trigger checks every 5 minutes for lessons starting in about 15 minutes and sends one reminder email to the student.
-
-To enable the automatic email reminders:
-
-1. Deploy the latest `apps-script/booking-sync.gs`.
-2. In Apps Script, open `Triggers` from the left sidebar.
-3. Click `Add Trigger`.
-4. Choose function: `sendUpcomingLessonReminders`.
-5. Event source: `Time-driven`.
-6. Type: `Minutes timer`.
-7. Interval: `Every 5 minutes`.
-8. Save and approve Google permissions.
-9. Optional: open the teacher dashboard and click `Check Reminders Now` to run one manual check.
-
-If Google shows a permission error for `ScriptApp.getProjectTriggers`, ignore the dashboard install button and use the manual trigger steps above. Manual triggers do not need the website to call `ScriptApp`.
-
-The script stores sent reminder markers in Apps Script properties so the same booking does not receive duplicate reminder emails.
+Each new lesson event gets a 15-minute popup/email reminder and the student is added as an attendee. No time-driven reminder trigger is required. If an old `sendUpcomingLessonReminders` trigger exists, run that function once or remove it from the Apps Script Triggers page; the function now removes the legacy trigger without sending duplicate mail.
 
 ## 6. Balance Deductions
 

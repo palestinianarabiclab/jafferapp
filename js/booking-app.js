@@ -110,6 +110,7 @@ const state = {
     lessonFeedbackSummaryUnsubscribe: null,
     teacherLessonFeedbackUnsubscribe: null,
     teacherLessonFeedbackRefreshTimer: null,
+    teacherLessonFeedbackLoaded: false,
     busyRefreshInFlight: null,
     googleCalendarModuleLoading: null,
     publicSettingsLoaded: false,
@@ -404,7 +405,7 @@ function loadScriptOnce(src) {
 async function ensureGoogleCalendarModuleLoaded() {
     if (window.connectToGoogleCalendar && window.importGoogleCalendarEventsToBusyBlocks) return;
     if (!state.googleCalendarModuleLoading) {
-        state.googleCalendarModuleLoading = loadScriptOnce("./js/google-calendar.js?v=20260726-auth-v3").finally(() => {
+        state.googleCalendarModuleLoading = loadScriptOnce("./js/google-calendar.js?v=20260727-calendar-parity-v4").finally(() => {
             state.googleCalendarModuleLoading = null;
         });
     }
@@ -1595,7 +1596,8 @@ function renderUpcomingLessonBanner(bookings) {
         if (status === "canceled" || status === "completed") return false;
 
         const slotStart = Number(b.slot || 0);
-        const slotEnd = slotStart + 50 * 60 * 1000; // 50 mins duration
+        const durationMinutes = Number(b.durationMinutes || b.slotMinutes || 50);
+        const slotEnd = slotStart + durationMinutes * 60 * 1000;
         const accessState = getLessonAccessState(slotStart, now);
 
         // Show if active now or starting in less than 15 hours
@@ -1615,7 +1617,8 @@ function renderUpcomingLessonBanner(bookings) {
     activeAndFuture.sort((a, b) => Number(a.slot) - Number(b.slot));
     const nextBooking = activeAndFuture[0];
     const slotStart = Number(nextBooking.slot);
-    const slotEnd = slotStart + 50 * 60 * 1000;
+    const lessonDurationMinutes = Number(nextBooking.durationMinutes || nextBooking.slotMinutes || 50);
+    const slotEnd = slotStart + lessonDurationMinutes * 60 * 1000;
 
     bannerEl.style.display = "block";
 
@@ -2205,14 +2208,7 @@ async function refreshTeacherLessonFeedback() {
             `).join("")
             : `<p class="small-note">No private lesson comments yet.</p>`;
     }
-    await window.db.collection("lessonFeedbackSummary").doc("teacher").set({
-        count: summary.count,
-        studentCount: summary.studentCount,
-        lessonCount: summary.lessonCount,
-        baselineStudentCount: LESSON_FEEDBACK_BASELINE.studentCount,
-        averages: summary.averages,
-        updatedAt: Date.now(),
-    }, { merge: true });
+    state.teacherLessonFeedbackLoaded = true;
 }
 
 function stopTeacherLessonFeedbackListener() {
@@ -4723,7 +4719,6 @@ async function refreshTeacherDashboard() {
     syncTeacherFormFields();
     await refreshTeacherStudents();
     await refreshTeacherBookings();
-    await refreshTeacherLessonFeedback();
     await refreshGoogleCalendarStatus();
     await renderBookingCalendar();
     updateTeacherOverviewStats();
@@ -4757,6 +4752,11 @@ function switchTeacherTab(tabId) {
     if (tabId === "tab-schedule") {
         renderTeacherWeekCalendar();
     }
+    if (tabId === "tab-reviews" && !state.teacherLessonFeedbackLoaded) {
+        refreshTeacherLessonFeedback().catch((error) => {
+            console.warn("Could not load lesson feedback.", error);
+        });
+    }
 }
 
 let teacherUpcomingBannerInterval = null;
@@ -4789,7 +4789,8 @@ function renderTeacherUpcomingLessonBanner() {
 
         const slotStart = Number(b.slot || b.timeSlot || 0);
         if (!slotStart) return false;
-        const slotEnd = slotStart + 50 * 60 * 1000; // 50 mins duration
+        const durationMinutes = Number(b.durationMinutes || b.slotMinutes || 50);
+        const slotEnd = slotStart + durationMinutes * 60 * 1000;
         const accessState = getLessonAccessState(slotStart, now);
 
         // Show if active now or starting in less than 12 hours
@@ -4809,7 +4810,8 @@ function renderTeacherUpcomingLessonBanner() {
     activeAndFuture.sort((a, b) => Number(a.slot || a.timeSlot || 0) - Number(b.slot || b.timeSlot || 0));
     const nextBooking = activeAndFuture[0];
     const slotStart = Number(nextBooking.slot || nextBooking.timeSlot);
-    const slotEnd = slotStart + 50 * 60 * 1000;
+    const lessonDurationMinutes = Number(nextBooking.durationMinutes || nextBooking.slotMinutes || 50);
+    const slotEnd = slotStart + lessonDurationMinutes * 60 * 1000;
 
     bannerEl.style.display = "block";
 
@@ -5264,6 +5266,7 @@ async function refreshTeacherBookings() {
         console.warn("Automatic platform statistics sync failed.", error);
     });
     renderTeacherWeekCalendar();
+    updateTeacherOverviewStats();
 }
 
 function renderTeacherWeekCalendar() {
@@ -6170,15 +6173,6 @@ async function loadBalanceChargeCandidates(now) {
             .get();
         addDocs(fallbackSnap);
     }
-
-    try {
-        const canceledSnap = await window.db
-            .collection("bookings")
-            .where("status", "==", "canceled")
-            .limit(50)
-            .get();
-        addDocs(canceledSnap);
-    } catch {}
 
     return Array.from(docsById.values());
 }
@@ -7358,6 +7352,7 @@ async function handleAuthState(user) {
     state.publicSettingsInFlight = null;
     state.bookingCalendarInFlight = null;
     state.busyBlocksRangeDays = 0;
+    state.teacherLessonFeedbackLoaded = false;
 
     if (!user) {
         if (upcomingBannerInterval) {
