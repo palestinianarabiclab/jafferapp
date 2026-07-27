@@ -1170,7 +1170,7 @@
                     <section class="teacher-editor__section">
                         <h4>Google Calendar Sync</h4>
                         <p class="teacher-edit-note">
-                            Connect Google Calendar and optionally link a Preply calendar as an extra source of busy times.
+                            Busy times use the persistent Apps Script authorization. Browser authorization is optional and is only needed for direct Google API tools.
                         </p>
                         <p id="googleCalendarStatus" class="status-line">Google Calendar status will appear here.</p>
                         <label class="field">
@@ -1178,7 +1178,7 @@
                             <input id="teacherPreplyCalendarId" type="text" placeholder="Paste your Preply calendar ID or shared URL" />
                         </label>
                         <div class="action-row action-row--wrap">
-                            <button id="googleConnectBtn" type="button" class="btn btn--primary">Connect Google Calendar</button>
+                            <button id="googleConnectBtn" type="button" class="btn btn--primary">Connect Browser Calendar (Optional)</button>
                             <button id="googleDisconnectBtn" type="button" class="btn btn--outline">Disconnect</button>
                             <button id="googleImportBtn" type="button" class="btn btn--outline">Import Busy Times</button>
                             <button id="savePreplyBtn" type="button" class="btn btn--outline">Save Preply Calendar ID</button>
@@ -1671,7 +1671,7 @@
 
     <script src="./js/firebase-bootstrap.js"></script>
 
-    <script type="module" src="./js/app.js?v=20260727-completed-lessons-v18"></script>
+    <script type="module" src="./js/app.js?v=20260727-persistent-calendar-v19"></script>
 </body>
 
 </html>
