@@ -4622,8 +4622,8 @@ function renderTeacherPackagesUi() {
     });
 }
 
-function getRecommendedPackagesForPrice(price = 10) {
-    const lessonPrice = Math.max(1, toMoneyValue(price) || 10);
+function getRecommendedPackagesForPrice(price = 20) {
+    const lessonPrice = Math.max(1, toMoneyValue(price) || 20);
     return [
         { id: "pkg-1", lessons: 1, price: lessonPrice, badge: "Single Lesson", popular: false },
         { id: "pkg-5", lessons: 5, price: Math.round(lessonPrice * 5 * 0.96), badge: "Starter Pack", popular: false },
@@ -5770,7 +5770,7 @@ function renderProfileUi() {
             }
         }, 50);
     }
-    if (els.preplyRateDisplay) els.preplyRateDisplay.textContent = p.rateText ? `Regular rate: ${p.rateText}` : "Regular rate: $15 / 50 min";
+    if (els.preplyRateDisplay) els.preplyRateDisplay.textContent = p.rateText ? `Regular rate: ${p.rateText}` : "Regular rate: $20 / 50 min";
 
     if (els.preplyAvatarContainer) {
         const avatarStr = (p.avatarUrl || "").trim();
