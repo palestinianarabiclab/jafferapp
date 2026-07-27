@@ -1,3 +1,14 @@
+export const MIN_BOOKING_LEAD_MINUTES = 6 * 60;
+
+export function isSlotBeyondMinimumLead(
+    slotStartMs,
+    nowMs = Date.now(),
+    minimumLeadMinutes = MIN_BOOKING_LEAD_MINUTES
+) {
+    return Number.isFinite(slotStartMs)
+        && slotStartMs >= nowMs + Math.max(0, minimumLeadMinutes) * 60000;
+}
+
 export function toMinutes(timeStr) {
     if (!timeStr || !timeStr.includes(":")) return null;
     const [h, m] = timeStr.split(":").map(Number);
@@ -119,10 +130,12 @@ export async function getBookedSlotsMap(startMs, endMs, { db, bookingSettings })
             if (!data || !data.slot) return;
             const status = (data.status || "booked").toLowerCase();
             if (status === "canceled") return;
+            const bookingDuration = Number(data.durationMinutes || occupiedMinutes);
+            const bookingBreak = Number(bookingSettings.breakMinutes || 0);
             booked.set(doc.id, {
                 id: doc.id,
                 start: Number(data.slot),
-                end: Number(data.slot) + occupiedMinutes * 60000,
+                end: Number(data.slot) + (bookingDuration + bookingBreak) * 60000,
                 status,
                 ...data,
             });
@@ -178,7 +191,13 @@ export async function getSchedulableSlots(daysToShow = 14, deps, options = {}) {
     const requestedRangeEndMs = Number.isFinite(options.rangeEndMs)
         ? Number(options.rangeEndMs)
         : (requestedRangeStartMs + (daysToShow + 3) * 24 * 60 * 60 * 1000);
-    const effectiveRangeStartMs = Math.max(now, requestedRangeStartMs);
+    const minimumLeadMinutes = Number.isFinite(options.minimumLeadMinutes)
+        ? Math.max(0, Number(options.minimumLeadMinutes))
+        : 0;
+    const effectiveRangeStartMs = Math.max(
+        now + minimumLeadMinutes * 60000,
+        requestedRangeStartMs
+    );
     const teacherRangeStart = getZonedDateKey(
         new Date(effectiveRangeStartMs - 24 * 60 * 60 * 1000),
         teacherTimezone

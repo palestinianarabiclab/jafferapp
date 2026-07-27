@@ -3,25 +3,27 @@
 
 <head>
     <meta charset="UTF-8" />
-    <title>Lesson Booking Studio</title>
+    <title>Jaffer | Palestinian Arabic Teacher Online</title>
+    <meta name="description" content="Learn spoken Palestinian Arabic online with Jaffer. Book private lessons, read verified student reviews, and practice practical Arabic for real conversations." />
+    <link rel="canonical" href="https://jafferbooking.vercel.app/" />
+    <meta property="og:type" content="profile" />
+    <meta property="og:title" content="Jaffer | Palestinian Arabic Teacher" />
+    <meta property="og:description" content="Private online Palestinian Arabic lessons focused on practical speaking and real conversations." />
+    <meta property="og:url" content="https://jafferbooking.vercel.app/" />
+    <meta name="twitter:card" content="summary" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self' 'unsafe-inline' https://www.google.com https://www.gstatic.com https://apis.google.com https://accounts.google.com https://cdn.jsdelivr.net; script-src-elem 'self' 'unsafe-inline' https://www.google.com https://www.gstatic.com https://apis.google.com https://accounts.google.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data: https:; connect-src 'self' https://www.google.com https://firestore.googleapis.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com https://www.googleapis.com https://apis.google.com https://www.gstatic.com https://cdn.jsdelivr.net https://content.googleapis.com https://script.google.com https://script.googleusercontent.com https://vitals.vercel-insights.com; frame-src https://www.google.com https://www.gstatic.com https://content.googleapis.com https://*.firebaseapp.com https://*.web.app; child-src https://www.google.com https://www.gstatic.com https://content.googleapis.com https://*.firebaseapp.com https://*.web.app; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests" />
-    <link rel="stylesheet" href="styles.css" />
+        content="default-src 'self'; script-src 'self' 'sha256-vvt4KWwuNr51XfE5m+hzeNEGhiOfZzG97ccfqGsPwvE=' https://www.google.com https://www.gstatic.com https://apis.google.com https://accounts.google.com https://cdn.jsdelivr.net https://vercel.live https://*.vercel-scripts.com; script-src-elem 'self' 'sha256-vvt4KWwuNr51XfE5m+hzeNEGhiOfZzG97ccfqGsPwvE=' https://www.google.com https://www.gstatic.com https://apis.google.com https://accounts.google.com https://cdn.jsdelivr.net https://vercel.live https://*.vercel-scripts.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data: https:; connect-src 'self' https://www.google.com https://firestore.googleapis.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com https://www.googleapis.com https://apis.google.com https://www.gstatic.com https://cdn.jsdelivr.net https://content.googleapis.com https://script.google.com https://script.googleusercontent.com https://vercel.live https://*.vercel-scripts.com https://vitals.vercel-insights.com; frame-src https://www.google.com https://www.gstatic.com https://content.googleapis.com https://*.firebaseapp.com https://*.web.app https://vercel.live https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; media-src 'self' https: blob:; child-src https://www.google.com https://www.gstatic.com https://content.googleapis.com https://*.firebaseapp.com https://*.web.app https://vercel.live https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests" />
+    <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin />
+    <link rel="preconnect" href="https://www.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://apis.google.com" crossorigin />
+    <link rel="dns-prefetch" href="https://identitytoolkit.googleapis.com" />
+    <link rel="stylesheet" href="styles.css?v=20260724-trial-history-v1" />
     <link rel="icon"
         href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230f172a'/%3E%3Ctext x='32' y='41' font-size='26' text-anchor='middle' fill='%23f8fafc' font-family='Arial, sans-serif'%3ELS%3C/text%3E%3C/svg%3E" />
 
     <!-- Vercel Speed Insights -->
-    <script>
-        window.si = window.si || function () { (window.siq = window.siq || []).push(arguments); };
-    </script>
-    <script defer src="/_vercel/speed-insights/script.js"></script>
-
-    <!-- Vercel Web Analytics -->
-    <script>
-        window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
-    </script>
-    <script defer src="/_vercel/insights/script.js"></script>
+    <script src="./js/speed-insights-bootstrap.js"></script>
 
     <script src="./js/config.js"></script>
 </head>
@@ -34,19 +36,251 @@
         </div>
     </div>
 
-    <main class="site-shell">
+    <main class="site-shell" itemscope itemtype="https://schema.org/ProfilePage">
         <section id="welcome-screen" class="app-screen app-screen--active">
-            <div class="welcome-gate">
-                <section class="welcome-hero">
-                    <div class="welcome-panel">
-                        <p class="eyebrow">Lesson Booking</p>
-                        <h1>Welcome</h1>
-                        <div class="welcome-actions">
-                            <button class="welcome-card" id="openStudentGateBtn" type="button">Student Login / Sign Up</button>
-                            <button class="welcome-card welcome-card--teacher" id="openTeacherGateBtn" type="button">Teacher Login</button>
+            <div class="preply-container">
+                <!-- Main Column: Teacher Profile, Intro Video, Bio, Methodology & Reviews -->
+                <div class="preply-main">
+                    <!-- Teacher Header Card -->
+                    <article class="preply-card teacher-header-card" itemprop="mainEntity" itemscope itemtype="https://schema.org/Person">
+                        <meta itemprop="url" content="https://jafferbooking.vercel.app/" />
+                        <meta itemprop="jobTitle" content="Online Palestinian Arabic Teacher" />
+                        <meta itemprop="knowsLanguage" content="Arabic" />
+                        <meta itemprop="knowsAbout" content="Palestinian Arabic, Levantine Arabic, spoken Arabic, Arabic conversation" />
+                        <div class="teacher-header-grid">
+                            <div class="teacher-avatar-wrapper">
+                                <div class="teacher-avatar" id="preplyAvatarContainer">
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" class="teacher-avatar-img" role="img" aria-label="Jaffer Teacher Profile Photo">
+                                        <defs>
+                                            <linearGradient id="avatarGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                                <stop offset="0%" stop-color="#0f766e" />
+                                                <stop offset="100%" stop-color="#115e59" />
+                                            </linearGradient>
+                                            <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                                <stop offset="0%" stop-color="#c2410c" />
+                                                <stop offset="100%" stop-color="#ea580c" />
+                                            </linearGradient>
+                                        </defs>
+                                        <circle cx="60" cy="60" r="60" fill="url(#avatarGrad)" />
+                                        <circle cx="60" cy="45" r="22" fill="#f8fafc" opacity="0.95" />
+                                        <path d="M60 25 C63 20 75 22 76 30 C76 34 72 38 72 38 C72 38 68 35 60 35 C52 35 48 38 48 38 C48 38 44 34 44 30 C45 22 57 20 60 25 Z" fill="#1e293b" />
+                                        <path d="M25 105 C25 80, 40 72, 60 72 C80 72, 95 80, 95 105 Z" fill="#f8fafc" opacity="0.95" />
+                                        <path d="M48 72 L60 88 L72 72 L60 102 Z" fill="url(#accentGrad)" />
+                                    </svg>
+                                    <span class="online-status-badge" title="Online & Available"></span>
+                                </div>
+                                <span class="verified-badge">✓ Verified Tutor</span>
+                            </div>
+
+                            <div class="teacher-header-info">
+                                <div class="teacher-title-row">
+                                    <h1 class="teacher-name"><span id="preplyTeacherName" itemprop="name">Jaffer</span></h1>
+                                    <span class="super-tutor-tag">⭐ Super Tutor</span>
+                                </div>
+                                <p class="teacher-headline" id="preplyTeacherHeadline" itemprop="description">Professional Palestinian Arabic & Levantine Dialect Specialist</p>
+
+                                <div class="teacher-badges-row">
+                                    <span class="preply-badge"><span class="badge-icon">⭐</span> <strong id="preplyAverageRatingLabel">5.0</strong> (<span id="preplyReviewCountBadge">48</span> reviews)</span>
+                                    <span class="preply-badge"><span class="badge-icon">🎓</span> Certified Native Speaker</span>
+                                    <span class="preply-badge"><span class="badge-icon">🗣️</span> Palestinian Arabic & Levantine</span>
+                                    <span class="preply-badge"><span class="badge-icon">💬</span> Speaks Arabic (Native), English (Upper-Intermediate B2)</span>
+                                    <span class="preply-badge"><span class="badge-icon">📊</span> <span id="preplyHoursBadge">1,200+</span> Lessons Taught</span>
+                                    <span class="preply-badge"><span class="badge-icon">👥</span> <span id="preplyStudentsBadge">85+</span> Active Students</span>
+                                </div>
+                            </div>
+                        </div>
+                    </article>
+
+                    <!-- Intro Teaser Card -->
+                    <article class="preply-card intro-video-card">
+                        <div class="intro-video-header">
+                            <h3>🎬 Video Introduction & Overview</h3>
+                            <span class="video-duration-tag">1:45 min</span>
+                        </div>
+                        <div class="video-preview-box" id="preplyVideoContainer">
+                            <div class="video-preview-overlay">
+                                <div class="play-btn-circle" id="preplyPlayVideoBtn" title="Watch Teaser Video">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                                        <polygon points="6,3 20,12 6,21"></polygon>
+                                    </svg>
+                                </div>
+                                <div class="video-preview-text">
+                                    <strong>Welcome to Palestinian Arabic Lab!</strong>
+                                    <p>Watch how we make spoken Arabic easy, natural, and engaging.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </article>
+
+                    <!-- Bio & Methodology -->
+                    <article class="preply-card bio-card">
+                        <h2 class="card-title">About me</h2>
+                        <div class="bio-content">
+                            <p class="bio-paragraph highlight-quote" id="preplyQuoteArabic">
+                                "Specializing in teaching Palestinian dialect to complete beginners. I guide you step by step with patience and clarity until you feel confident using Arabic in real life."
+                            </p>
+                            <div class="bio-collapsible-wrapper" style="position: relative;">
+                                <p class="bio-paragraph" id="preplyBioText" style="max-height: 180px; overflow: hidden; transition: max-height 0.4s ease; position: relative;">
+                                    A native Arabic speaker from Palestine-Gaza, I’m passionate about languages, culture, and helping people around the world communicate in Arabic with ease. I speak both Arabic and English, so I can guide you clearly—even if you're a complete beginner.<br><br>I have experience teaching Arabic to English-speaking students for absolute beginners.<br><br>I specialize in Palestinian dialect.<br><br>My lessons are interactive, personalized, and always focused on making you feel confident when you speak.<br><br>I also use visuals, examples from real-life situations, and clear English explanations to help you learn faster.<br><br>If you're thinking about learning Arabic, now is the perfect time to start!<br><br>I understand that learning a new language can be challenging, but with the right guidance, it becomes exciting and incredibly rewarding.<br><br>My goal is to ensure you feel confident, motivated, and comfortable in every lesson.<br><br>Together, we'll focus on what you need—whether it's fluency, understanding grammar, or simply enjoying the language.<br><br>You don't need any prior experience—just bring your curiosity, and I'll take care of the rest!<br><br>Book a trial lesson with me and let's begin your Arabic learning journey together.<br><br>I look forward to meeting you and helping you achieve your language goals!
+                                </p>
+                                <div id="bioFadeOverlay" style="position: absolute; bottom: 0; left: 0; width: 100%; height: 50px; background: linear-gradient(to bottom, rgba(255,255,255,0), var(--surface-strong)); pointer-events: none; transition: opacity 0.3s ease;"></div>
+                            </div>
+                            <div style="margin-top: 8px; margin-bottom: 16px;">
+                                <button id="preplyBioToggleBtn" class="btn btn--outline btn--small" style="display: none; align-items: center; gap: 6px; font-weight: 500; padding: 6px 12px; font-size: 0.85rem;">
+                                    <span id="preplyBioToggleText">Read more</span>
+                                    <svg id="preplyBioToggleChevron" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transition: transform 0.2s;"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                </button>
+                            </div>
+
+                            <h3 class="subsection-title">💡 Why Learn With Me?</h3>
+                            <ul class="methodology-list">
+                                <li>
+                                    <span class="list-icon">✨</span>
+                                    <div>
+                                        <strong>Conversational Focus from Day 1:</strong> You will start speaking authentic Palestinian expressions in your very first trial lesson.
+                                    </div>
+                                </li>
+                                <li>
+                                    <span class="list-icon">📚</span>
+                                    <div>
+                                        <strong>Free Exclusive Course Materials:</strong> Access structured vocabulary sheets, audio dialogues, and grammar cheat-sheets.
+                                    </div>
+                                </li>
+                                <li>
+                                    <span class="list-icon">🎯</span>
+                                    <div>
+                                        <strong>Personalized Lesson Plan:</strong> Every lesson is customized according to your pace, feedback, and personal objectives.
+                                    </div>
+                                </li>
+                                <li>
+                                    <span class="list-icon">🕒</span>
+                                    <div>
+                                        <strong>Flexible Scheduling:</strong> Easily pick and adjust lesson times in your own local timezone with automated reminders.
+                                    </div>
+                                </li>
+                            </ul>
+                        </div>
+                    </article>
+
+                    <article class="preply-card teaching-style-card" id="teachingStyleCard">
+                        <div class="teaching-style-card__head">
+                            <div>
+                                <h2 class="card-title">Jaffer's teaching style</h2>
+                                <p>Based on tutor data and real student reviews</p>
+                            </div>
+                            <span class="teaching-style-card__sparkle" aria-hidden="true">&#10024;</span>
+                        </div>
+                        <div class="teaching-style-tags" aria-label="Teaching style">
+                            <span>Patient</span>
+                            <span>Structured</span>
+                            <span>Adaptable</span>
+                            <span>Encouraging</span>
+                        </div>
+                    </article>
+
+                    <article class="preply-card lesson-rating-summary" id="lessonRatingSummary">
+                        <div class="lesson-rating-summary__head">
+                            <div>
+                                <p class="eyebrow">Anonymous lesson feedback</p>
+                                <h2 class="card-title">Lesson rating</h2>
+                            </div>
+                            <span id="lessonRatingSummaryCount" class="lesson-rating-summary__count">Based on 93 anonymous student reviews</span>
+                        </div>
+                        <div id="lessonRatingSummaryGrid" class="lesson-rating-summary__grid"></div>
+                    </article>
+
+                    <!-- Student Reviews Section -->
+                    <article class="preply-card reviews-card" id="studentReviewsSection">
+                        <div class="reviews-header">
+                            <div>
+                                <h2 class="card-title">Student Reviews <span class="review-count">(<span id="preplyReviewCountHeader">58</span>)</span></h2>
+                                <div class="overall-rating">
+                                    <span class="stars">⭐⭐⭐⭐⭐</span>
+                                    <strong><span id="preplyAverageScoreText">5.0</span> out of 5</strong>
+                                </div>
+                            </div>
+                            <div class="reviews-sort-container">
+                                <label for="preplyReviewsSort" class="reviews-sort-label">Sort by:</label>
+                                <select id="preplyReviewsSort" class="reviews-sort-select">
+                                    <option value="newest">Newest</option>
+                                    <option value="highest_rated">Highest Rated</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="reviews-grid" id="preplyReviewsGrid">
+                            <!-- Dynamic Reviews Rendered Here -->
+                        </div>
+                        <div class="reviews-toggle-row">
+                            <button id="studentReviewsToggleBtn" type="button" class="btn btn--outline reviews-toggle-btn" hidden>
+                                Show all reviews
+                            </button>
+                        </div>
+                    </article>
+                </div>
+
+                <!-- Sidebar: Free Trial & Booking Action Card -->
+                <aside class="preply-sidebar">
+                    <div class="preply-booking-box">
+                        <div class="booking-box-badge">
+                            <span class="badge-dot"></span> Free Trial Available
+                        </div>
+
+                        <div class="booking-box-pricing">
+                            <div class="price-main">
+                                <span class="free-pill">FREE</span>
+                                <span class="trial-label">1st Trial Lesson</span>
+                            </div>
+                            <span class="regular-rate" id="lessonRateDisplay">Regular rate: $10 / 50 min</span>
+                        </div>
+
+                        <!-- Lesson Packages Block in Sidebar -->
+                        <div class="packages-sidebar-box">
+                            <div class="packages-sidebar-title">📦 Lesson Packages</div>
+                            <div id="sidebarPackagesContainer" class="sidebar-packages-list">
+                                <!-- Will be rendered dynamically -->
+                            </div>
+                        </div>
+
+                        <div class="booking-box-actions">
+                            <button class="btn btn--hero-trial" id="bookFreeTrialBtn" type="button">
+                                <span class="btn-icon">🎁</span>
+                                <span>Book a Free Trial Lesson</span>
+                                <span class="btn-subtext">First lesson is free</span>
+                            </button>
+
+                            <button class="btn btn--outline btn--full" id="openStudentGateBtn" type="button">
+                                Student Login / Sign Up
+                            </button>
+
+                            <button class="btn btn--ghost btn--full btn--small" id="openTeacherGateBtn" type="button" hidden>
+                                Teacher Login
+                            </button>
+                        </div>
+
+                        <div class="booking-guarantees">
+                            <div class="guarantee-item">
+                                <span class="guarantee-icon">⚡</span>
+                                <span>Instant schedule confirmation in your local timezone</span>
+                            </div>
+                            <div class="guarantee-item">
+                                <span class="guarantee-icon">🔒</span>
+                                <span>100% Satisfaction & flexible rescheduling</span>
+                            </div>
+                            <div class="guarantee-item">
+                                <span class="guarantee-icon">📖</span>
+                                <span>Free access to course materials & notes</span>
+                            </div>
+                        </div>
+
+                        <div class="contact-teacher-quick">
+                            <p class="small-note text-center">Have questions before booking?</p>
+                            <div class="action-row action-row--center">
+                                <button id="welcomeWhatsappBtn" type="button" class="btn btn--outline btn--small">WhatsApp Teacher</button>
+                            </div>
                         </div>
                     </div>
-                </section>
+                </aside>
             </div>
         </section>
 
@@ -66,33 +300,89 @@
                     <strong id="studentAuthBadge">Signed out</strong>
                     <p class="small-note" id="studentAuthHint">Sign in to book a lesson.</p>
                 </div>
-                <button type="button" class="btn btn--ghost btn--small" id="studentLogoutBtn" hidden>Sign Out</button>
+                <div class="student-session-actions">
+                    <a class="btn btn--outline btn--small" href="https://jafferbooking.vercel.app/">Course Materials</a>
+                    <button type="button" class="btn btn--danger btn--small" id="studentDeleteAccountBtn" hidden>Delete Account</button>
+                    <button type="button" class="btn btn--ghost btn--small" id="studentLogoutBtn" hidden>Sign Out</button>
+                </div>
             </div>
 
             <div class="student-layout">
-                <article class="panel panel--schedule">
-                    <div class="panel__head">
+                <!-- Upcoming Lesson Live Banner -->
+                <div id="upcomingLessonBanner" style="display: none; width: 100%; grid-column: 1 / -1; margin-bottom: 20px;"></div>
+
+                <!-- 1. Available Times (Schedule) -->
+                <article class="panel panel--schedule" id="preplyBookingGridPanel">
+                    <div class="panel__head" style="margin-bottom: 20px;">
                         <div>
-                            <h3>Available Times</h3>
-                            <p class="small-note">Times are shown in your local timezone.</p>
+                            <h3 style="font-size: 1.35rem; font-weight: 700; color: #111827;">Available Times</h3>
+                            <p class="small-note" style="color: #6b7280; font-size: 0.88rem;">Times are shown in your local timezone.</p>
                         </div>
-                        <div class="timezone-pill" id="bookingTimezoneLabel">Loading timezone...</div>
                     </div>
 
-                    <div class="week-nav">
-                        <button type="button" class="btn btn--ghost btn--small" id="bookingWeekPrev">Previous</button>
-                        <div id="bookingWeekLabel" class="week-nav__label">This week</div>
-                        <button type="button" class="btn btn--ghost btn--small" id="bookingWeekNext">Next</button>
+                    <!-- New Premium Preply-Style Controls Row -->
+                    <div class="calendar-controls-row">
+                        <div class="calendar-controls-left">
+                            <div class="calendar-nav-pill">
+                                <button type="button" class="calendar-nav-btn" id="bookingWeekPrev" title="Previous Week">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                                </button>
+                                <div class="calendar-nav-divider"></div>
+                                <button type="button" class="calendar-nav-btn" id="bookingWeekNext" title="Next Week">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                                </button>
+                            </div>
+                            <div id="bookingWeekLabel" class="calendar-week-range">Loading dates...</div>
+                        </div>
+
+                        <div class="calendar-controls-right">
+                            <div class="custom-timezone-dropdown">
+                                <div class="custom-timezone-display">
+                                    <div class="timezone-info-stack">
+                                        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 2px;">
+                                            <span id="timezoneAutoBadge" style="width: 7px; height: 7px; background-color: #10b981; border-radius: 50%; display: inline-block;" title="Timezone Status"></span>
+                                            <span id="timezoneAutoLabel" style="font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; color: #059669;">Device Timezone</span>
+                                        </div>
+                                        <div class="timezone-name" id="selectedTimezoneName">Loading...</div>
+                                        <div class="timezone-offset" id="selectedTimezoneOffset">GMT +0:00</div>
+                                    </div>
+                                    <div class="timezone-chevron">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                    </div>
+                                </div>
+                                <select id="studentTimezoneSelect" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; z-index: 2;">
+                                    <!-- Options will be dynamically populated -->
+                                </select>
+                            </div>
+                        </div>
                     </div>
 
-                    <div class="day-nav" aria-label="Choose a day">
-                        <button type="button" class="btn btn--ghost btn--small" id="bookingDayPrev">Previous Day</button>
-                        <div id="bookingDayLabel" class="day-nav__label">Today</div>
-                        <button type="button" class="btn btn--ghost btn--small" id="bookingDayNext">Next Day</button>
+                    <!-- Hidden legacy items to prevent JS errors -->
+                    <div style="display: none !important;">
+                        <div id="bookingTimezoneLabel"></div>
+                        <div class="day-nav">
+                            <button type="button" id="bookingDayPrev">Prev</button>
+                            <div id="bookingDayLabel">Today</div>
+                            <button type="button" id="bookingDayNext">Next</button>
+                        </div>
                     </div>
 
-                    <div id="bookingWeeklyGrid" class="week-grid"></div>
+                    <!-- Modern Mobile Week Day Selector Tabs -->
+                    <div id="bookingMobileDayTabs" class="booking-mobile-day-tabs"></div>
+
+                    <!-- Scrollable Grid Wrapper -->
+                    <div class="booking-grid-wrapper">
+                        <div id="bookingWeeklyGrid" class="week-grid"></div>
+                    </div>
+
                     <div id="bookingEmptyState" class="empty-state" hidden>No available times in this week.</div>
+
+                    <!-- View Full Schedule Button Centered at Bottom -->
+                    <div class="view-full-schedule-row" id="viewFullScheduleRow" style="display: none;">
+                        <button type="button" id="viewFullScheduleBtn" class="btn--view-full-schedule">
+                            View full schedule
+                        </button>
+                    </div>
 
                     <div id="bookingInfo" class="selection-card" hidden>
                         <div class="selection-card__label">Selected lesson time</div>
@@ -100,52 +390,258 @@
                     </div>
                 </article>
 
-                <div class="student-stack">
-                    <article class="panel panel--form">
+                <!-- 2. Confirm Booking -->
+                <article class="panel panel--form">
+                    <div class="panel__head">
+                        <div>
+                            <h3>Confirm Booking</h3>
+                            <p class="small-note" id="bookingAccountSummary">Sign in, choose a time, then confirm your lesson.</p>
+                        </div>
+                    </div>
+                    <div class="student-balance-card" id="studentBalanceCard" style="background: var(--bg-soft); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 14px; margin-bottom: 16px;" hidden>
+                        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                            <div>
+                                <span style="font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--ink-light); font-weight: 700; display: block;">Account Credit</span>
+                                <strong id="studentBalanceValue" style="font-size: 1.4rem; color: var(--primary);">$0.00</strong>
+                                <span id="studentRemainingLessonsBadge" style="display: inline-block; background: var(--primary); color: #fff; font-size: 0.82rem; font-weight: 700; padding: 2px 8px; border-radius: 12px; margin-left: 6px;">(0 lessons remaining)</span>
+                            </div>
+                            <div style="text-align: right;">
+                                <span id="studentLessonPriceValue" style="font-size: 0.88rem; font-weight: 600; color: var(--ink-light); display: block;">Your lesson price: $15</span>
+                            </div>
+                        </div>
+                        <div id="studentTrialNotice" style="margin-top: 8px; font-size: 0.85rem; background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; padding: 6px 10px; border-radius: 6px; font-weight: 600;" hidden>
+                            🎁 Welcome! Your first lesson is completely free. No credit required.
+                        </div>
+                    </div>
+
+                    <form id="bookingForm" class="form-stack">
+                        <input type="hidden" id="bookingWebsite" autocomplete="off" />
+                        <button type="submit" class="btn btn--primary btn--full" id="bookingSubmit" disabled>
+                            <span class="btn__label">Confirm Selected Time</span>
+                            <span class="btn__spinner" aria-hidden="true"></span>
+                        </button>
+                        <p id="bookingMsg" class="status-line"></p>
+                    </form>
+                    <div class="student-payment-launcher student-payment-launcher--booking">
+                        <button id="studentPaymentOpenBtn" type="button" class="btn btn--primary student-payment-launcher__button">
+                            <span class="student-payment-launcher__icon" aria-hidden="true">P</span>
+                            <span>Pay Now</span>
+                        </button>
+                        <span>Confirm your package with the teacher, then pay securely using PayPal.</span>
+                    </div>
+                </article>
+
+                <!-- 3. Check Booking Status -->
+                <article class="panel panel--support">
+                    <div class="support-grid">
+                        <div>
+                            <div class="panel__head panel__head--compact">
+                                <div>
+                                    <h3>Check Booking Status</h3>
+                                    <p class="small-note">Your upcoming bookings appear here after signing in.</p>
+                                </div>
+                            </div>
+                            <button id="bookingStatusBtn" type="button" class="btn btn--outline">Refresh My Bookings</button>
+                            <input id="bookingStatusEmail" type="email" hidden />
+                            <div id="bookingStatusList" class="status-list"></div>
+                            <p id="bookingStatusMsg" class="status-line"></p>
+
+                            <div style="margin-top: 18px; border-top: 1px dashed var(--line); padding-top: 14px;">
+                                <h4 style="font-size: 0.95rem; margin-bottom: 6px; color: var(--ink); font-weight: 700;">📜 Billing & Transactions History</h4>
+                                <div id="studentTransactionsList" style="font-size: 0.85rem; max-height: 220px; overflow-y: auto; background: var(--bg-soft); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 10px;">
+                                    <div class="small-note">Sign in to view your financial history log.</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="contact-card">
+                            <h3>Need Help?</h3>
+                            <p class="small-note">Reach the teacher directly if you want to ask before booking.</p>
+                            <div class="action-row action-row--column">
+                                <button id="contactWhatsAppBtn" type="button" class="btn btn--ghost">Contact on WhatsApp</button>
+                                <button id="contactEmailBtn" type="button" class="btn btn--outline">Contact by Email</button>
+                            </div>
+                        </div>
+                    </div>
+                </article>
+
+                <article class="lesson-feedback-card" id="lessonFeedbackCard" role="dialog" aria-modal="true" aria-labelledby="lessonFeedbackTitle" hidden>
+                    <div class="lesson-feedback-dialog">
+                        <div class="lesson-feedback-dialog__head">
+                            <div>
+                                <span class="lesson-feedback-dialog__icon" aria-hidden="true">&#10024;</span>
+                                <p class="eyebrow">Private lesson feedback</p>
+                                <h3 id="lessonFeedbackTitle">How was your lesson?</h3>
+                                <p class="small-note" id="lessonFeedbackLessonLabel">Rate your completed lesson. Your answers are anonymous in public statistics.</p>
+                            </div>
+                            <button id="lessonFeedbackClose" type="button" class="lesson-feedback-close" aria-label="Close feedback form">&times;</button>
+                        </div>
+                        <form id="lessonFeedbackForm" class="form-stack">
+                            <input id="lessonFeedbackBookingId" type="hidden" />
+                            <div class="lesson-feedback-metrics">
+                                <div class="lesson-feedback-metric" data-lesson-feedback-metric="preparation">
+                                    <span class="lesson-feedback-metric__icon">&#9998;</span>
+                                    <strong>Preparation</strong>
+                                    <span>Ready and organized</span>
+                                    <div class="lesson-feedback-stars" role="group" aria-label="Preparation rating"></div>
+                                </div>
+                                <div class="lesson-feedback-metric" data-lesson-feedback-metric="clarity">
+                                    <span class="lesson-feedback-metric__icon">&#128172;</span>
+                                    <strong>Clarity</strong>
+                                    <span>Easy to understand</span>
+                                    <div class="lesson-feedback-stars" role="group" aria-label="Clarity rating"></div>
+                                </div>
+                                <div class="lesson-feedback-metric" data-lesson-feedback-metric="reassurance">
+                                    <span class="lesson-feedback-metric__icon">&#10084;</span>
+                                    <strong>Reassurance</strong>
+                                    <span>Built your confidence</span>
+                                    <div class="lesson-feedback-stars" role="group" aria-label="Reassurance rating"></div>
+                                </div>
+                                <div class="lesson-feedback-metric" data-lesson-feedback-metric="progress">
+                                    <span class="lesson-feedback-metric__icon">&#127919;</span>
+                                    <strong>Progress</strong>
+                                    <span>Moved toward your goal</span>
+                                    <div class="lesson-feedback-stars" role="group" aria-label="Progress rating"></div>
+                                </div>
+                            </div>
+                            <label class="field lesson-feedback-comment-field">
+                                <span>What could make the next lesson better? <small>(Optional)</small></span>
+                                <textarea id="lessonFeedbackComment" rows="3" maxlength="500" placeholder="Write a short private note for the teacher..."></textarea>
+                            </label>
+                            <div class="lesson-feedback-actions">
+                                <button id="lessonFeedbackSubmit" type="submit" class="btn btn--primary">Submit Lesson Feedback</button>
+                                <button id="lessonFeedbackLater" type="button" class="btn btn--ghost">Maybe Later</button>
+                            </div>
+                            <p id="lessonFeedbackMsg" class="status-line"></p>
+                        </form>
+                    </div>
+                </article>
+                <button id="lessonFeedbackReminder" type="button" class="lesson-feedback-reminder" hidden>
+                    <span class="lesson-feedback-reminder__icon" aria-hidden="true">&#9733;</span>
+                    <span>
+                        <strong>Rate your lesson</strong>
+                        <small>Your feedback is still pending</small>
+                    </span>
+                </button>
+
+                <!-- 4. Lesson Packages -->
+                <article class="panel panel--form">
+                    <div class="panel__head">
+                        <div>
+                            <h3>Available Lesson Packages</h3>
+                            <p class="small-note">Take a look at our available lesson packages. Please contact the teacher directly to purchase booking credits.</p>
+                        </div>
+                    </div>
+                    <div class="offer-list">
+                        <div id="packagesGrid" class="packages-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 14px;">
+                            <!-- Will be rendered dynamically -->
+                        </div>
+                    </div>
+                </article>
+
+                <article class="student-payment-card" id="studentPaymentCard" role="dialog" aria-modal="true" aria-labelledby="studentPaymentTitle" hidden>
+                    <div class="student-payment-dialog">
+                        <button id="studentPaymentCloseBtn" type="button" class="student-payment-close" aria-label="Close payment window">&times;</button>
+                        <div class="student-payment-card__visual" aria-hidden="true">
+                            <span class="student-payment-card__paypal">P</span>
+                            <span class="student-payment-card__secure">&#128274;</span>
+                        </div>
+                        <div class="student-payment-card__content">
+                            <p class="eyebrow">Payment Method</p>
+                            <h3 id="studentPaymentTitle">Pay securely with PayPal</h3>
+                            <p class="student-payment-card__intro">Use the teacher's PayPal link after confirming the offer with the teacher.</p>
+                            <div class="student-payment-reminder">
+                                <span class="student-payment-reminder__icon" aria-hidden="true">&#128161;</span>
+                                <div>
+                                    <strong>PayPal reminder</strong>
+                                    <p id="studentPaypalReminder">Just a quick reminder: when you choose to pay through PayPal, please choose Goods and Services. Choosing another option may affect my PayPal account.</p>
+                                </div>
+                            </div>
+                            <a id="studentPaypalLink" class="btn btn--primary student-payment-card__button" href="https://paypal.me/mahmoudtafesh2007" target="_blank" rel="noopener noreferrer">
+                                <span>Open PayPal</span>
+                                <span aria-hidden="true">&rarr;</span>
+                            </a>
+                            <small class="student-payment-card__note">Confirm the package and amount with the teacher before sending payment.</small>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- 5. Leave a Teacher Review -->
+                <article class="panel panel--form" id="studentReviewCard" hidden style="display: none;">
                         <div class="panel__head">
                             <div>
-                                <h3>Confirm Booking</h3>
-                                <p class="small-note" id="bookingAccountSummary">Sign in, choose a time, then confirm your lesson.</p>
+                                <h3>Leave a Teacher Review</h3>
+                                <p class="small-note">Share your learning experience with Jaffer. Reviews appear on the main profile page.</p>
                             </div>
                         </div>
-                        <div class="student-balance" id="studentBalanceCard" hidden>
-                            <span class="student-balance__label">Your balance</span>
-                            <strong id="studentBalanceValue">--</strong>
-                            <span id="studentLessonPriceValue">Lesson price: --</span>
-                        </div>
-
-                        <form id="bookingForm" class="form-stack">
-                            <input type="hidden" id="bookingWebsite" autocomplete="off" />
-                            <button type="submit" class="btn btn--primary btn--full" id="bookingSubmit" disabled>
-                                <span class="btn__label">Confirm Selected Time</span>
-                                <span class="btn__spinner" aria-hidden="true"></span>
-                            </button>
-                            <p id="bookingMsg" class="status-line"></p>
-                        </form>
-                    </article>
-
-                    <article class="panel panel--support">
-                        <div class="support-grid">
-                            <div>
-                                <div class="panel__head panel__head--compact">
-                                    <div>
-                                        <h3>Check Booking Status</h3>
-                                        <p class="small-note">Your upcoming bookings appear here after signing in.</p>
+                        <div id="studentReviewContainer">
+                            <form id="studentReviewForm" class="form-stack">
+                                <div class="inline-fields">
+                                    <label class="field">
+                                        <span>Rating</span>
+                                        <select id="studentRatingSelect">
+                                            <option value="5">⭐⭐⭐⭐⭐ (5/5 Excellent)</option>
+                                            <option value="4">⭐⭐⭐⭐ (4/5 Very Good)</option>
+                                            <option value="3">⭐⭐⭐ (3/5 Good)</option>
+                                        </select>
+                                    </label>
+                                    <label class="field">
+                                        <span>Country / City</span>
+                                        <input id="studentReviewCountry" type="text" placeholder="🇺🇸 USA or 🇬🇧 London" required />
+                                    </label>
+                                    <label class="field">
+                                        <span>Dialect / Topic</span>
+                                        <input id="studentReviewTag" type="text" placeholder="e.g. Spoken Palestinian Arabic" required />
+                                    </label>
+                                </div>
+                                <fieldset class="review-traits">
+                                    <legend>What stood out?</legend>
+                                    <div class="review-trait-grid">
+                                        <label><input type="checkbox" value="patient" data-review-trait /> Patient</label>
+                                        <label><input type="checkbox" value="clear explanations" data-review-trait /> Clear explanations</label>
+                                        <label><input type="checkbox" value="speaking practice" data-review-trait /> Speaking practice</label>
+                                        <label><input type="checkbox" value="Palestinian dialect" data-review-trait /> Palestinian dialect</label>
+                                        <label><input type="checkbox" value="well prepared" data-review-trait /> Well prepared</label>
+                                        <label><input type="checkbox" value="confidence building" data-review-trait /> Builds confidence</label>
                                     </div>
-                                </div>
-                                <button id="bookingStatusBtn" type="button" class="btn btn--outline">Refresh My Bookings</button>
-                                <input id="bookingStatusEmail" type="email" hidden />
-                                <div id="bookingStatusList" class="status-list"></div>
-                                <p id="bookingStatusMsg" class="status-line"></p>
-                            </div>
-
-                            <div class="contact-card">
-                                <h3>Need Help?</h3>
-                                <p class="small-note">Reach the teacher directly if you want to ask before booking.</p>
-                                <div class="action-row action-row--column">
-                                    <button id="contactWhatsAppBtn" type="button" class="btn btn--ghost">Contact on WhatsApp</button>
-                                    <button id="contactEmailBtn" type="button" class="btn btn--outline">Contact by Email</button>
-                                </div>
+                                </fieldset>
+                                <details class="review-writing-assistant">
+                                    <summary>✨ Help me write my review</summary>
+                                    <div class="review-writing-assistant__body">
+                                        <label class="field">
+                                            <span>What was your main goal?</span>
+                                            <input id="studentReviewGoal" type="text" maxlength="120" placeholder="For example: speaking with family" />
+                                        </label>
+                                        <label class="field">
+                                            <span>What improved?</span>
+                                            <input id="studentReviewProgress" type="text" maxlength="160" placeholder="For example: confidence and pronunciation" />
+                                        </label>
+                                        <label class="field">
+                                            <span>Would you recommend the teacher?</span>
+                                            <select id="studentReviewRecommend">
+                                                <option value="yes">Yes</option>
+                                                <option value="maybe">Maybe</option>
+                                                <option value="no">No</option>
+                                            </select>
+                                        </label>
+                                        <button type="button" class="btn btn--outline btn--small" id="studentReviewDraftBtn">Create editable draft</button>
+                                    </div>
+                                </details>
+                                <label class="field">
+                                    <span>Your Feedback & Experience</span>
+                                    <textarea id="studentReviewText" rows="5" minlength="20" maxlength="1200" placeholder="Describe your experience, progress, and what future students should know..." required></textarea>
+                                    <small class="review-character-count"><span id="studentReviewCharacterCount">0</span>/1200</small>
+                                </label>
+                                <div id="studentReviewPreview" class="student-review-preview" hidden></div>
+                                <button type="submit" class="btn btn--primary" id="studentReviewSubmit">
+                                    <span>Submit Review</span>
+                                </button>
+                                <p id="studentReviewMsg" class="status-line"></p>
+                            </form>
+                            <div id="studentReviewSuccessBox" hidden class="review-success-card">
+                                <span class="badge-dot"></span>
+                                <strong>Thank you for your feedback!</strong>
+                                <p class="small-note">Your feedback has been published on the teacher's profile.</p>
                             </div>
                         </div>
                     </article>
@@ -157,9 +653,9 @@
             <div class="section-heading">
                 <div>
                     <p class="eyebrow">Teacher</p>
-                    <h2>Manage schedule, bookings, and calendar sync</h2>
+                    <h2>Manage schedule, bookings, profile & reviews</h2>
                     <p class="section-copy">
-                        Sign in with the teacher account to control availability and reservations.
+                        Sign in with the teacher account to control availability, reservations, and profile settings.
                     </p>
                 </div>
             </div>
@@ -167,12 +663,12 @@
             <section class="teacher-banner">
                 <div>
                     <p class="student-hero__kicker">Control Center</p>
-                    <h3>Availability, automation, and bookings in one place.</h3>
+                    <h3>Availability, automation, profile & reviews in one place.</h3>
                 </div>
                 <div class="teacher-banner__chips">
+                    <span class="teacher-chip">Profile Editor</span>
+                    <span class="teacher-chip">Reviews Management</span>
                     <span class="teacher-chip">Calendar Sync</span>
-                    <span class="teacher-chip">Apps Script</span>
-                    <span class="teacher-chip">Booking Admin</span>
                 </div>
             </section>
 
@@ -185,173 +681,511 @@
             <p id="teacherAuthMsg" class="status-line"></p>
 
             <div id="teacherDashboard" class="dashboard" hidden>
-                <section class="teacher-editor__section">
-                    <h4>Contact Settings (Guest Upgrade)</h4>
-                    <p class="teacher-edit-note">
-                        Set the WhatsApp number and notification email used on the student booking page.
-                    </p>
-                    <form id="contactSettingsForm" class="form-stack">
-                        <label class="field">
-                            <span>WhatsApp Number or URL</span>
-                            <input id="teacherWhatsapp" type="text" placeholder="+970... or https://wa.me/..." />
-                        </label>
-                        <label class="field">
-                            <span>Contact / Notification Email</span>
-                            <input id="teacherContactEmail" type="email" placeholder="teacher@example.com" />
-                        </label>
-                        <button type="submit" class="btn btn--primary">Save Contact</button>
-                        <p id="contactMsg" class="status-line"></p>
-                    </form>
-                </section>
-
-                <section class="teacher-editor__section">
-                    <h4>Booking Availability</h4>
-                    <p class="teacher-edit-note">
-                        Set your weekly availability. Students will only see these times.
-                    </p>
-                    <form id="availabilityForm" class="form-stack">
-                        <div class="inline-fields">
-                            <label class="field">
-                                <span>Timezone</span>
-                                <input id="teacherTimezone" type="text" placeholder="Africa/Cairo" />
-                            </label>
-                            <label class="field">
-                                <span>Session Length (Minutes)</span>
-                                <input id="teacherSlotMinutes" type="number" min="30" max="180" step="5" />
-                            </label>
-                            <label class="field">
-                                <span>Break Between Sessions</span>
-                                <input id="teacherBreakMinutes" type="number" min="0" max="120" step="5" />
-                            </label>
-                        </div>
-                        <div id="teacherDaysGrid" class="days-grid"></div>
-                        <div class="action-row">
-                            <button type="submit" class="btn btn--primary">Save Availability</button>
-                            <button id="teacherResetAvailabilityBtn" type="button" class="btn btn--outline">Reset Availability</button>
-                        </div>
-                        <p id="availabilityMsg" class="status-line"></p>
-                    </form>
-                </section>
-
-                <section class="teacher-editor__section teacher-editor__section--collapsible">
-                    <button type="button" class="section-toggle" id="exceptionToggle" aria-expanded="false" aria-controls="exceptionBody">
-                        <span>
-                            <span class="section-toggle__title">Busy Blocks (Specific Dates)</span>
-                            <span class="teacher-edit-note">Add one-off busy times. Imported calendar times appear here too.</span>
-                        </span>
-                        <span class="section-toggle__arrow" aria-hidden="true">v</span>
+                <!-- Teacher Navigation Tab Bar -->
+                <nav class="teacher-nav-tabs" role="tablist" aria-label="Teacher Dashboard Navigation">
+                    <button type="button" class="teacher-tab-btn is-active" data-teacher-tab="tab-home" role="tab" aria-selected="true" aria-controls="tab-home">
+                        <span class="tab-icon">🏠</span>
+                        <span class="tab-label">Home</span>
                     </button>
-                    <div id="exceptionBody" class="collapsible-body" hidden>
-                        <form id="exceptionForm" class="form-stack">
+                    <button type="button" class="teacher-tab-btn" data-teacher-tab="tab-schedule" role="tab" aria-selected="false" aria-controls="tab-schedule">
+                        <span class="tab-icon">📅</span>
+                        <span class="tab-label">Schedule & Bookings</span>
+                    </button>
+                    <button type="button" class="teacher-tab-btn" data-teacher-tab="tab-students" role="tab" aria-selected="false" aria-controls="tab-students">
+                        <span class="tab-icon">👥</span>
+                        <span class="tab-label">Students & Balances</span>
+                    </button>
+                    <button type="button" class="teacher-tab-btn" data-teacher-tab="tab-reviews" role="tab" aria-selected="false" aria-controls="tab-reviews">
+                        <span class="tab-icon">⭐</span>
+                        <span class="tab-label">Reviews</span>
+                    </button>
+                    <button type="button" class="teacher-tab-btn" data-teacher-tab="tab-settings" role="tab" aria-selected="false" aria-controls="tab-settings">
+                        <span class="tab-icon">⚙️</span>
+                        <span class="tab-label">Settings</span>
+                    </button>
+                </nav>
+
+                <!-- TAB 1: HOME / OVERVIEW -->
+                <div id="tab-home" class="teacher-tab-content is-active" role="tabpanel">
+                    <!-- Teacher Next Lesson Alert Card (Appears <= 12 hours before lesson) -->
+                    <div id="teacherUpcomingLessonBanner" style="margin-bottom: 24px; display: none;"></div>
+
+                    <div class="teacher-welcome-card">
+                        <div class="welcome-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px;">
+                            <div>
+                                <h3 style="font-size: 1.35rem; font-weight: 700; margin-bottom: 4px;">👋 Welcome back, <span id="dashTeacherName">Teacher</span>!</h3>
+                                <p class="teacher-edit-note" style="margin-bottom: 0;">Here is your quick summary and control dashboard overview.</p>
+                            </div>
+                            <div id="teacherSystemStatusBadge" style="display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 20px; font-size: 0.82rem; font-weight: 700; background: #e6f4ea; color: #137333; border: 1px solid #ceead6; cursor: pointer; transition: all 0.2s ease; user-select: none;" title="Click to check connection & refresh sync">
+                                <span style="width: 8px; height: 8px; border-radius: 50%; background: #34a853; display: inline-block; box-shadow: 0 0 0 2px rgba(52,168,83,0.2);" id="teacherStatusDot"></span>
+                                <span id="teacherStatusText">System & Calendar Sync Online</span>
+                            </div>
+                        </div>
+
+                        <div class="teacher-stats-grid">
+                            <div class="stat-card" data-goto-tab="tab-students" title="Click to view Students">
+                                <div class="stat-icon">👥</div>
+                                <div class="stat-info">
+                                    <span class="stat-label">Active Students</span>
+                                    <strong class="stat-value" id="dashActiveStudentsVal">--</strong>
+                                </div>
+                            </div>
+                            <div class="stat-card" data-goto-tab="tab-students" title="Click to view Students & Balances" style="border-left: 4px solid #10b981;">
+                                <div class="stat-icon" style="background: #e6f4ea; color: #137333;">💰</div>
+                                <div class="stat-info">
+                                    <span class="stat-label">Total Payments Received / إجمالي ما دفعه الطلاب</span>
+                                    <strong class="stat-value" id="dashTotalStudentBalanceVal" style="color: #137333;">$0.00</strong>
+                                </div>
+                            </div>
+                            <div class="stat-card" data-goto-tab="tab-schedule" title="Click to view Schedule">
+                                <div class="stat-icon">📅</div>
+                                <div class="stat-info">
+                                    <span class="stat-label">Upcoming Bookings</span>
+                                    <strong class="stat-value" id="dashUpcomingBookingsVal">--</strong>
+                                </div>
+                            </div>
+                            <div class="stat-card" data-goto-tab="tab-settings" title="Click to view Settings">
+                                <div class="stat-icon">🎓</div>
+                                <div class="stat-info">
+                                    <span class="stat-label">Lessons Taught</span>
+                                    <strong class="stat-value" id="dashHoursTaughtVal">1,200+</strong>
+                                </div>
+                            </div>
+                            <div class="stat-card" data-goto-tab="tab-reviews" title="Click to view Reviews">
+                                <div class="stat-icon">⭐</div>
+                                <div class="stat-info">
+                                    <span class="stat-label">Average Rating</span>
+                                    <strong class="stat-value" id="dashRatingVal">5.0</strong>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="quick-actions-section" style="margin-top: 24px;">
+                            <h4 style="font-size: 1.05rem; font-weight: 700; margin-bottom: 12px; color: var(--text);">⚡ Quick Shortcuts</h4>
+                            <div class="quick-actions-grid">
+                                <button type="button" class="quick-action-card" data-goto-tab="tab-schedule">
+                                    <span class="quick-action-icon">📅</span>
+                                    <div class="quick-action-text">
+                                        <strong>Manage Schedule & Availability</strong>
+                                        <span>Set weekly hours, block busy times & manage bookings</span>
+                                    </div>
+                                    <span class="quick-action-arrow">→</span>
+                                </button>
+                                <button type="button" class="quick-action-card" data-goto-tab="tab-students">
+                                    <span class="quick-action-icon">👥</span>
+                                    <div class="quick-action-text">
+                                        <strong>Students & Balances</strong>
+                                        <span>View student profiles, set lesson prices & deduct due lessons</span>
+                                    </div>
+                                    <span class="quick-action-arrow">→</span>
+                                </button>
+                                <button type="button" class="quick-action-card" data-goto-tab="tab-reviews">
+                                    <span class="quick-action-icon">⭐</span>
+                                    <div class="quick-action-text">
+                                        <strong>Reviews & Feedback</strong>
+                                        <span>Manage student reviews & toggle public visibility</span>
+                                    </div>
+                                    <span class="quick-action-arrow">→</span>
+                                </button>
+                                <button type="button" class="quick-action-card" data-goto-tab="tab-settings">
+                                    <span class="quick-action-icon">⚙️</span>
+                                    <div class="quick-action-text">
+                                        <strong>Profile & Integration Settings</strong>
+                                        <span>Edit bio, rates, PayPal payment link & Apps Script sync</span>
+                                    </div>
+                                    <span class="quick-action-arrow">→</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 2: SCHEDULE & BOOKINGS -->
+                <div id="tab-schedule" class="teacher-tab-content" role="tabpanel" hidden>
+                    <section class="teacher-week-calendar" aria-labelledby="teacherCalendarTitle">
+                        <div class="teacher-week-calendar__toolbar">
+                            <div>
+                                <h4 id="teacherCalendarTitle">Weekly Calendar</h4>
+                                <p class="teacher-edit-note">Click any student lesson to move it to any free future time.</p>
+                            </div>
+                            <div class="teacher-calendar-toolbar-actions">
+                                <div class="teacher-calendar-view-switch" role="group" aria-label="Calendar view">
+                                    <button type="button" class="is-active" data-teacher-calendar-view="week">Week</button>
+                                    <button type="button" data-teacher-calendar-view="day">Day</button>
+                                    <button type="button" data-teacher-calendar-view="agenda">Agenda</button>
+                                </div>
+                                <div class="teacher-calendar-nav">
+                                    <button id="teacherCalendarPrevBtn" type="button" class="btn btn--outline btn--small" aria-label="Previous period">&larr;</button>
+                                    <button id="teacherCalendarTodayBtn" type="button" class="btn btn--outline btn--small">Today</button>
+                                    <button id="teacherCalendarNextBtn" type="button" class="btn btn--outline btn--small" aria-label="Next period">&rarr;</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="teacher-calendar-summary">
+                            <strong id="teacherCalendarRange">This week</strong>
+                            <div class="teacher-calendar-legend" aria-label="Calendar legend">
+                                <span><i class="is-confirmed"></i> Confirmed lesson</span>
+                                <span><i class="is-trial"></i> Trial lesson</span>
+                                <span><i class="is-busy"></i> Busy time</span>
+                            </div>
+                        </div>
+                        <div id="teacherCalendarGrid" class="teacher-calendar-grid"></div>
+                    </section>
+
+                    <section class="teacher-editor__section">
+                        <div class="panel__head">
+                            <div>
+                                <h4>Bookings Management</h4>
+                                <p class="teacher-edit-note">
+                                    Review, cancel, or reschedule upcoming bookings.
+                                </p>
+                            </div>
+                            <div class="action-row action-row--wrap">
+                                <button id="refreshBookingsBtn" type="button" class="btn btn--outline btn--small">Refresh</button>
+                                <button id="clearBookingsBtn" type="button" class="btn btn--ghost btn--small">Clear All Bookings</button>
+                            </div>
+                        </div>
+                        <p id="teacherBookingMsg" class="status-line"></p>
+                        <div id="teacherBookingList" class="booking-panel"></div>
+                    </section>
+
+                    <section class="teacher-editor__section">
+                        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                            <h4>Booking Availability</h4>
+                            <span id="googleSyncIndicator" style="font-size: 0.82rem; color: var(--muted); display: none; align-items: center; gap: 6px; font-family: system-ui, -apple-system, sans-serif;">
+                                <span style="display: inline-block; width: 6px; height: 6px; background-color: #10b981; border-radius: 50%;"></span>
+                                Last Calendar Sync: <strong id="googleSyncTime" style="font-weight: 600; color: var(--primary);">--</strong>
+                            </span>
+                        </div>
+                        <p class="teacher-edit-note">
+                            Set your weekly availability. Students will only see these times.
+                        </p>
+                        <form id="availabilityForm" class="form-stack">
                             <div class="inline-fields">
                                 <label class="field">
-                                    <span>Date</span>
-                                    <input id="exceptionDate" type="date" required />
+                                    <span>Timezone</span>
+                                    <input id="teacherTimezone" type="text" placeholder="Africa/Cairo" />
                                 </label>
                                 <label class="field">
-                                    <span>Start</span>
-                                    <input id="exceptionStart" type="time" required />
+                                    <span>Session Length (Minutes)</span>
+                                    <input id="teacherSlotMinutes" type="number" min="30" max="180" step="5" />
                                 </label>
                                 <label class="field">
-                                    <span>End</span>
-                                    <input id="exceptionEnd" type="time" required />
+                                    <span>Break Between Sessions</span>
+                                    <input id="teacherBreakMinutes" type="number" min="0" max="120" step="5" />
+                                </label>
+                            </div>
+                            <div id="teacherDaysGrid" class="days-grid"></div>
+                            <div class="action-row">
+                                <button type="submit" class="btn btn--primary">Save Availability</button>
+                                <button id="teacherResetAvailabilityBtn" type="button" class="btn btn--outline">Reset Availability</button>
+                            </div>
+                            <p id="availabilityMsg" class="status-line"></p>
+                        </form>
+                    </section>
+
+                    <section class="teacher-editor__section teacher-editor__section--collapsible">
+                        <button type="button" class="section-toggle" id="exceptionToggle" aria-expanded="false" aria-controls="exceptionBody">
+                            <span>
+                                <span class="section-toggle__title">Busy Blocks (Specific Dates)</span>
+                                <span class="teacher-edit-note">Add one-off busy times. Imported calendar times appear here too.</span>
+                            </span>
+                            <span class="section-toggle__arrow" aria-hidden="true">v</span>
+                        </button>
+                        <div id="exceptionBody" class="collapsible-body" hidden>
+                            <form id="exceptionForm" class="form-stack">
+                                <div class="inline-fields">
+                                    <label class="field">
+                                        <span>Date</span>
+                                        <input id="exceptionDate" type="date" required />
+                                    </label>
+                                    <label class="field">
+                                        <span>Start</span>
+                                        <input id="exceptionStart" type="time" required />
+                                    </label>
+                                    <label class="field">
+                                        <span>End</span>
+                                        <input id="exceptionEnd" type="time" required />
+                                    </label>
+                                </div>
+                                <label class="field">
+                                    <span>Note (Optional)</span>
+                                    <input id="exceptionNote" type="text" placeholder="Meeting, travel, holiday..." />
+                                </label>
+                                <div class="action-row">
+                                    <button type="submit" class="btn btn--primary">Add Busy Block</button>
+                                    <button id="clearExceptionsBtn" type="button" class="btn btn--ghost">Clear Busy Blocks</button>
+                                </div>
+                                <p id="exceptionMsg" class="status-line"></p>
+                            </form>
+                            <div id="exceptionList" class="exception-list"></div>
+                        </div>
+                    </section>
+                </div>
+
+                <!-- TAB 3: STUDENTS & BALANCES -->
+                <div id="tab-students" class="teacher-tab-content" role="tabpanel" hidden>
+                    <div class="teacher-balance-banner" style="background: linear-gradient(135deg, #0f766e 0%, #115e59 100%); color: #ffffff; padding: 20px 24px; border-radius: 12px; margin-bottom: 24px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; box-shadow: 0 4px 16px rgba(15,118,110,0.18);">
+                        <div>
+                            <div style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.9; font-weight: 700;">💰 Total Student Credit / إجمالي أرصدة الطلاب المشحونة</div>
+                            <div class="teacher-revenue-label">💰 Total Payments Received / إجمالي ما دفعه الطلاب</div>
+                            <div style="font-size: 2rem; font-weight: 800; margin-top: 4px;" id="teacherTotalStudentBalanceHead">$0.00</div>
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="font-size: 0.95rem; font-weight: 700;">Active Students: <span id="teacherTotalStudentsCount" style="color: #6ee7b7;">0</span></div>
+                            <div style="font-size: 0.82rem; opacity: 0.85; margin-top: 2px;">Starts at $0 and increases with recorded student payments</div>
+                        </div>
+                    </div>
+
+                    <section class="teacher-editor__section">
+                        <div class="panel__head">
+                            <div>
+                                <h4>Students & Balances</h4>
+                                <p class="teacher-edit-note">
+                                    Open a student to set their balance and lesson price. Past lessons and late cancellations are deducted once.
+                                </p>
+                            </div>
+                            <div class="action-row action-row--wrap">
+                                <button id="refreshStudentsBtn" type="button" class="btn btn--outline btn--small">Refresh</button>
+                                <button id="reconcileBalancesBtn" type="button" class="btn btn--ghost btn--small">Deduct Due Lessons</button>
+                            </div>
+                        </div>
+                        <p id="teacherStudentsMsg" class="status-line"></p>
+                        <div id="teacherStudentsList" class="student-admin-list"></div>
+                    </section>
+                </div>
+
+                <!-- TAB 4: REVIEWS -->
+                <div id="tab-reviews" class="teacher-tab-content" role="tabpanel" hidden>
+                    <section class="teacher-editor__section">
+                        <div class="panel__head">
+                            <div>
+                                <h4>Lesson Feedback Analytics</h4>
+                                <p class="teacher-edit-note">Private comments and anonymous averages from completed lessons. This is separate from public teacher reviews.</p>
+                            </div>
+                            <span id="teacherLessonFeedbackCount" class="lesson-rating-summary__count">0 ratings</span>
+                        </div>
+                        <div id="teacherLessonFeedbackMetrics" class="lesson-rating-summary__grid"></div>
+                        <div id="teacherLessonFeedbackComments" class="lesson-feedback-comments"></div>
+                    </section>
+
+                    <section class="teacher-editor__section">
+                        <h4>Reviews Management</h4>
+                        <p class="teacher-edit-note">
+                            Toggle public visibility of student reviews or manage existing review cards.
+                        </p>
+
+                        <div class="reviews-visibility-control" style="margin-bottom: 24px; padding: 16px; background-color: var(--color-bg-base, #f8fafc); border-radius: var(--radius-md, 8px); display: flex; align-items: center; justify-content: space-between; gap: 16px; border: 1px solid var(--color-border, #e2e8f0);">
+                            <div>
+                                <strong style="display: block; font-size: 15px; margin-bottom: 4px;">Public Reviews Visibility</strong>
+                                <span class="teacher-edit-note" style="margin: 0;">Show or hide the entire reviews section on your student booking page.</span>
+                            </div>
+                            <button type="button" id="togglePublicReviewsBtn" class="btn btn--primary" style="white-space: nowrap; min-width: 140px;">
+                                Hide Reviews
+                            </button>
+                        </div>
+
+                        <div style="margin-top:24px;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 12px;">
+                                <h5 style="margin: 0;">Current Active Reviews (<span id="teacherReviewsCountLabel">0</span>)</h5>
+                                <button type="button" id="toggleAdminReviewsListBtn" class="btn btn--ghost btn--small">Hide List</button>
+                            </div>
+                            <div id="teacherReviewsAdminList" class="reviews-grid"></div>
+                        </div>
+                    </section>
+                </div>
+
+                <!-- TAB 5: SETTINGS & INTEGRATIONS -->
+                <div id="tab-settings" class="teacher-tab-content" role="tabpanel" hidden>
+                    <section class="teacher-editor__section">
+                        <h4>Preply Profile Settings</h4>
+                        <p class="teacher-edit-note">
+                            Customize your profile name, headline, image, video teaser, rates, and stats displayed on the main welcome page.
+                        </p>
+                        <form id="teacherProfileForm" class="form-stack">
+                            <div class="inline-fields">
+                                <label class="field">
+                                    <span>Teacher Name (English)</span>
+                                    <input id="teacherProfileNameInput" type="text" placeholder="Jaffer" required />
+                                </label>
+                                <label class="field">
+                                    <span>Regular Rate Display</span>
+                                    <input id="teacherProfileRateInput" type="text" placeholder="Regular rate: $15 / 50 min" required />
                                 </label>
                             </div>
                             <label class="field">
-                                <span>Note (Optional)</span>
-                                <input id="exceptionNote" type="text" placeholder="Meeting, travel, holiday..." />
+                                <span>Headline / Specialization Title</span>
+                                <input id="teacherProfileHeadlineInput" type="text" placeholder="Professional Palestinian Arabic & Levantine Dialect Specialist" required />
                             </label>
-                            <div class="action-row">
-                                <button type="submit" class="btn btn--primary">Add Busy Block</button>
-                                <button id="clearExceptionsBtn" type="button" class="btn btn--ghost">Clear Busy Blocks</button>
+                            <div class="inline-fields">
+                                <label class="field" style="flex: 1.8;">
+                                    <span>Profile Image (URL or Upload File)</span>
+                                    <div style="display: flex; gap: 8px; align-items: center;">
+                                        <input id="teacherProfileAvatarUrlInput" type="text" placeholder="https://... image link or upload file" style="flex: 1;" />
+                                        <label class="btn btn--outline btn--small" style="margin: 0; cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 5px;" title="Upload image from computer">
+                                            📁 Upload
+                                            <input type="file" id="teacherProfileAvatarFileInput" accept="image/*" style="display: none;" />
+                                        </label>
+                                    </div>
+                                    <div id="avatarPreviewContainer" style="margin-top: 8px; display: flex; align-items: center; gap: 10px; display: none;">
+                                        <img id="avatarPreviewImg" src="" alt="Avatar Preview" style="width: 44px; height: 44px; border-radius: 50%; object-fit: cover; border: 2px solid var(--primary);" />
+                                        <span style="font-size: 0.8rem; color: var(--muted);" id="avatarPreviewText">Image selected</span>
+                                        <button type="button" id="removeAvatarBtn" class="btn btn--ghost btn--small" style="color: #ef4444; padding: 2px 6px; font-size: 0.75rem;">Clear Image</button>
+                                    </div>
+                                </label>
+                                <label class="field" style="flex: 1.2;">
+                                    <span>Video Introduction Embed / URL</span>
+                                    <input id="teacherProfileVideoUrlInput" type="text" placeholder="YouTube or Vimeo embed link / MP4 URL" />
+                                </label>
                             </div>
-                            <p id="exceptionMsg" class="status-line"></p>
+                            <div class="inline-fields">
+                                <label class="field">
+                                    <span>Total Hours / Lessons Taught</span>
+                                    <input id="teacherProfileHoursInput" type="text" placeholder="1,200+" required />
+                                </label>
+                                <label class="field">
+                                    <span>Total Active Students</span>
+                                    <input id="teacherProfileStudentsInput" type="text" placeholder="85+" required />
+                                </label>
+                            </div>
+                            <label class="field">
+                                <span>Bio Arabic Quote</span>
+                                <textarea id="teacherProfileQuoteInput" rows="2" placeholder="Welcome to my lessons..."></textarea>
+                            </label>
+                            <label class="field">
+                                <span>Bio English Description</span>
+                                <textarea id="teacherProfileBioInput" rows="3" placeholder="Hello and welcome! I am Jaffer..."></textarea>
+                            </label>
+                            <button type="submit" class="btn btn--primary" id="saveTeacherProfileBtn">Save Profile Settings</button>
+                            <p id="teacherProfileMsg" class="status-line"></p>
                         </form>
-                        <div id="exceptionList" class="exception-list"></div>
-                    </div>
-                </section>
+                    </section>
 
-                <section class="teacher-editor__section">
-                    <h4>Apps Script Backend</h4>
-                    <p class="teacher-edit-note">
-                        Preferred stable sync for creating Google Calendar events and importing busy blocks.
-                    </p>
-                    <form id="appsScriptForm" class="form-stack">
+                    <section class="teacher-editor__section">
+                        <h4>Contact Settings (Guest Upgrade)</h4>
+                        <p class="teacher-edit-note">
+                            Set the WhatsApp number and notification email used on the student booking page.
+                        </p>
+                        <form id="contactSettingsForm" class="form-stack">
+                            <label class="field">
+                                <span>WhatsApp Number or URL</span>
+                                <input id="teacherWhatsapp" type="text" placeholder="+970... or https://wa.me/..." />
+                            </label>
+                            <label class="field">
+                                <span>Contact / Notification Email</span>
+                                <input id="teacherContactEmail" type="email" placeholder="teacher@example.com" />
+                            </label>
+                            <label class="field">
+                                <span>Classroom Meeting Link</span>
+                                <input id="teacherClassroomMeetingUrl" type="url" placeholder="https://meet.google.com/abc-defg-hij or another meeting link" />
+                            </label>
+                            <button type="submit" class="btn btn--primary">Save Contact</button>
+                            <p id="contactMsg" class="status-line"></p>
+                        </form>
+                    </section>
+
+                    <section class="teacher-editor__section">
+                        <h4>Course Offers & PayPal</h4>
+                        <p class="teacher-edit-note">
+                            Set the public course offer, lesson package defaults, and the PayPal reminder shown to students.
+                        </p>
+                        <form id="courseOffersForm" class="form-stack">
+                            <div class="inline-fields">
+                                <label class="field">
+                                    <span>Course Price (USD)</span>
+                                    <input id="courseAccessPrice" type="number" min="0" step="0.01" placeholder="15" />
+                                </label>
+                                <label class="field">
+                                    <span>Course Units</span>
+                                    <input id="courseAccessUnits" type="number" min="1" step="1" placeholder="15" />
+                                </label>
+                                <label class="field">
+                                    <span>Free Trial Lessons</span>
+                                    <input id="freeTrialLessons" type="number" min="0" step="1" placeholder="1" />
+                                </label>
+                            </div>
+                            <label class="field">
+                                <span>PayPal Payment Link</span>
+                                <input id="paypalPaymentLink" type="url" placeholder="https://www.paypal.com/..." />
+                            </label>
+                            <label class="field">
+                                <span>PayPal Reminder</span>
+                                <textarea id="paypalReminder" rows="3"></textarea>
+                            </label>
+                            <button type="submit" class="btn btn--primary">Save Offers</button>
+                            <p id="courseOffersMsg" class="status-line"></p>
+                        </form>
+                    </section>
+
+                    <section class="teacher-editor__section">
+                        <h4>Edit Lesson Packages</h4>
+                        <p class="teacher-edit-note">
+                            Add, modify, or remove lesson packages shown to students on the booking dashboard.
+                        </p>
+                        <form id="teacherPackagesForm" class="form-stack">
+                            <div id="teacherPackagesContainer" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px;">
+                                <!-- Packages list will be rendered dynamically here -->
+                            </div>
+                            <div class="action-row" style="display: flex; justify-content: space-between; align-items: center;">
+                                <button id="teacherAddPackageBtn" type="button" class="btn btn--outline" style="padding: 6px 12px; font-size: 0.85rem;">
+                                    ➕ Add New Package
+                                </button>
+                                <button type="submit" class="btn btn--primary">Save Packages</button>
+                            </div>
+                            <p id="teacherPackagesMsg" class="status-line"></p>
+                        </form>
+                    </section>
+
+                    <section class="teacher-editor__section">
+                        <h4>Apps Script Backend</h4>
+                        <p class="teacher-edit-note">
+                            Preferred stable sync for creating Google Calendar events and importing busy blocks.
+                        </p>
+                        <form id="appsScriptForm" class="form-stack">
+                            <label class="field">
+                                <span>Apps Script Web App URL</span>
+                                <input id="teacherAppsScriptUrl" type="url" placeholder="https://script.google.com/..." />
+                            </label>
+                            <div class="action-row action-row--wrap">
+                                <button type="submit" class="btn btn--primary">Save Apps Script URL</button>
+                                <button id="appsScriptTestBtn" type="button" class="btn btn--outline">Test Apps Script</button>
+                                <button id="appsScriptRefreshBusyBtn" type="button" class="btn btn--ghost">Import Busy via Apps Script</button>
+                                <button id="appsScriptSyncPendingBtn" type="button" class="btn btn--ghost">Sync Pending Bookings</button>
+                                <button id="appsScriptQuotaBtn" type="button" class="btn btn--ghost">Refresh Email Quota</button>
+                                <button id="appsScriptInstallReminderBtn" type="button" class="btn btn--ghost">Reminder Setup Steps</button>
+                                <button id="appsScriptReminderCheckBtn" type="button" class="btn btn--ghost">Check Reminders Now</button>
+                                <button id="appsScriptBalanceCheckBtn" type="button" class="btn btn--ghost">Check Balance Deductions</button>
+                                <button id="appsScriptPreplyStatsBtn" type="button" class="btn btn--ghost">Sync Preply Statistics</button>
+                            </div>
+                            <div class="quota-meter" id="appsScriptEmailQuota" hidden>
+                                <span class="quota-meter__label">Email quota today</span>
+                                <strong id="appsScriptEmailQuotaValue">--</strong>
+                                <span class="quota-meter__hint">remaining recipients</span>
+                            </div>
+                            <p id="appsScriptMsg" class="status-line"></p>
+                            <div id="preplyStatsSummary" class="preply-stats-summary" hidden></div>
+                        </form>
+                    </section>
+
+                    <section class="teacher-editor__section">
+                        <h4>Google Calendar Sync</h4>
+                        <p class="teacher-edit-note">
+                            Connect Google Calendar and optionally link a Preply calendar as an extra source of busy times.
+                        </p>
+                        <p id="googleCalendarStatus" class="status-line">Google Calendar status will appear here.</p>
                         <label class="field">
-                            <span>Apps Script Web App URL</span>
-                            <input id="teacherAppsScriptUrl" type="url" placeholder="https://script.google.com/..." />
+                            <span>Preply Calendar ID (Optional)</span>
+                            <input id="teacherPreplyCalendarId" type="text" placeholder="Paste your Preply calendar ID or shared URL" />
                         </label>
                         <div class="action-row action-row--wrap">
-                            <button type="submit" class="btn btn--primary">Save Apps Script URL</button>
-                            <button id="appsScriptTestBtn" type="button" class="btn btn--outline">Test Apps Script</button>
-                            <button id="appsScriptRefreshBusyBtn" type="button" class="btn btn--ghost">Import Busy via Apps Script</button>
-                            <button id="appsScriptSyncPendingBtn" type="button" class="btn btn--ghost">Sync Pending Bookings</button>
-                            <button id="appsScriptQuotaBtn" type="button" class="btn btn--ghost">Refresh Email Quota</button>
-                            <button id="appsScriptInstallReminderBtn" type="button" class="btn btn--ghost">Reminder Setup Steps</button>
-                            <button id="appsScriptReminderCheckBtn" type="button" class="btn btn--ghost">Check Reminders Now</button>
-                            <button id="appsScriptBalanceCheckBtn" type="button" class="btn btn--ghost">Check Balance Deductions</button>
+                            <button id="googleConnectBtn" type="button" class="btn btn--primary">Connect Google Calendar</button>
+                            <button id="googleDisconnectBtn" type="button" class="btn btn--outline">Disconnect</button>
+                            <button id="googleImportBtn" type="button" class="btn btn--outline">Import Busy Times</button>
+                            <button id="savePreplyBtn" type="button" class="btn btn--outline">Save Preply Calendar ID</button>
+                            <button id="googleTestPreplyBtn" type="button" class="btn btn--ghost">Test Preply Calendar</button>
                         </div>
-                        <div class="quota-meter" id="appsScriptEmailQuota" hidden>
-                            <span class="quota-meter__label">Email quota today</span>
-                            <strong id="appsScriptEmailQuotaValue">--</strong>
-                            <span class="quota-meter__hint">remaining recipients</span>
-                        </div>
-                        <p id="appsScriptMsg" class="status-line"></p>
-                    </form>
-                </section>
-
-                <section class="teacher-editor__section">
-                    <h4>Google Calendar Sync</h4>
-                    <p class="teacher-edit-note">
-                        Connect Google Calendar and optionally link a Preply calendar as an extra source of busy times.
-                    </p>
-                    <p id="googleCalendarStatus" class="status-line">Google Calendar status will appear here.</p>
-                    <label class="field">
-                        <span>Preply Calendar ID (Optional)</span>
-                        <input id="teacherPreplyCalendarId" type="text" placeholder="Paste your Preply calendar ID or shared URL" />
-                    </label>
-                    <div class="action-row action-row--wrap">
-                        <button id="googleConnectBtn" type="button" class="btn btn--primary">Connect Google Calendar</button>
-                        <button id="googleDisconnectBtn" type="button" class="btn btn--outline">Disconnect</button>
-                        <button id="googleImportBtn" type="button" class="btn btn--outline">Import Busy Times</button>
-                        <button id="savePreplyBtn" type="button" class="btn btn--outline">Save Preply Calendar ID</button>
-                        <button id="googleTestPreplyBtn" type="button" class="btn btn--ghost">Test Preply Calendar</button>
-                    </div>
-                </section>
-
-                <section class="teacher-editor__section">
-                    <div class="panel__head">
-                        <div>
-                            <h4>Students & Balances</h4>
-                            <p class="teacher-edit-note">
-                                Open a student to set their balance and lesson price. Past lessons and late cancellations are deducted once.
-                            </p>
-                        </div>
-                        <div class="action-row action-row--wrap">
-                            <button id="refreshStudentsBtn" type="button" class="btn btn--outline btn--small">Refresh</button>
-                            <button id="reconcileBalancesBtn" type="button" class="btn btn--ghost btn--small">Deduct Due Lessons</button>
-                        </div>
-                    </div>
-                    <p id="teacherStudentsMsg" class="status-line"></p>
-                    <div id="teacherStudentsList" class="student-admin-list"></div>
-                </section>
-
-                <section class="teacher-editor__section">
-                    <div class="panel__head">
-                        <div>
-                            <h4>Bookings</h4>
-                            <p class="teacher-edit-note">
-                                Review, cancel, or reschedule upcoming bookings.
-                            </p>
-                        </div>
-                        <div class="action-row action-row--wrap">
-                            <button id="refreshBookingsBtn" type="button" class="btn btn--outline btn--small">Refresh</button>
-                            <button id="clearBookingsBtn" type="button" class="btn btn--ghost btn--small">Clear All Bookings</button>
-                        </div>
-                    </div>
-                    <p id="teacherBookingMsg" class="status-line"></p>
-                    <div id="teacherBookingList" class="booking-panel"></div>
-                </section>
+                    </section>
+                </div>
             </div>
         </section>
     </main>
@@ -361,7 +1195,7 @@
         <div class="modal__body">
             <button class="modal__close" data-close-teacher-modal type="button">&times;</button>
             <h3>Teacher Login</h3>
-            
+
             <form id="teacherLoginForm" class="form-stack">
                 <label class="field">
                     <span>Email</span>
@@ -662,9 +1496,44 @@
             <button class="modal__close" data-close-booking-success type="button">&times;</button>
             <h3>Booking Confirmed</h3>
             <p id="bookingSuccessText" class="small-note"></p>
+            <div id="bookingSuccessTrialIntro" class="booking-success-trial-intro" hidden>
+                <span class="booking-success-trial-intro__icon" aria-hidden="true">&#128075;</span>
+                <div>
+                    <strong>Introduce yourself before your trial lesson</strong>
+                    <p>Your message is ready. WhatsApp will open and you can review it before pressing Send.</p>
+                </div>
+            </div>
             <div class="action-row action-row--end">
+                <a id="bookingSuccessWhatsAppBtn" class="btn btn--whatsapp btn--small" href="#" target="_blank" rel="noopener noreferrer" hidden>
+                    Message Teacher on WhatsApp
+                </a>
                 <button class="btn btn--primary btn--small" data-close-booking-success type="button">Close</button>
             </div>
+        </div>
+    </div>
+
+    <div id="studentDeleteAccountModal" class="modal">
+        <div class="modal__backdrop" data-close-delete-account-modal></div>
+        <div class="modal__body" role="dialog" aria-modal="true" aria-labelledby="studentDeleteAccountTitle">
+            <button class="modal__close" data-close-delete-account-modal type="button">&times;</button>
+            <h3 id="studentDeleteAccountTitle">Delete your account?</h3>
+            <p class="small-note">
+                This permanently deletes your login and student profile. Past bookings remain in the booking history.
+            </p>
+            <form id="studentDeleteAccountForm" class="form-stack">
+                <label class="field">
+                    <span>Confirm your password</span>
+                    <input id="studentDeleteAccountPassword" type="password" autocomplete="current-password" required />
+                </label>
+                <p id="studentDeleteAccountMsg" class="status-line"></p>
+                <div class="action-row action-row--end">
+                    <button class="btn btn--ghost btn--small" data-close-delete-account-modal type="button">Cancel</button>
+                    <button class="btn btn--danger btn--small" id="studentDeleteAccountConfirmBtn" type="submit">
+                        <span class="btn__label">Permanently Delete</span>
+                        <span class="btn__spinner" aria-hidden="true"></span>
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
 
@@ -701,21 +1570,108 @@
         </div>
     </div>
 
+    <!-- Virtual Classroom Modal -->
+    <div id="classroomModal" class="modal">
+        <div class="modal__backdrop" data-close-classroom-modal></div>
+        <div class="modal__body modal__body--wide" style="max-width: 1180px; width: 96vw; height: 92vh; display: flex; flex-direction: column; padding: 20px; overflow: hidden;">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 10px;">
+                <div>
+                    <h3 style="margin: 0; display: flex; align-items: center; gap: 8px;">
+                        <span>🎓 Jaffer Arabic Live Classroom</span>
+                        <span class="super-tutor-tag" style="font-size: 0.72rem;">GOOGLE MEET LIVE ROOM</span>
+                    </h3>
+                    <p class="small-note" id="classroomSubHeader" style="margin: 2px 0 0;">Screen share, interactive whiteboard & auto-lesson counter</p>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <button type="button" class="btn btn--primary btn--small" id="classroomLaunchNewTabBtn">📹 Open Video Room in New Page</button>
+                    <div style="background: #0f172a; color: #10b981; font-family: monospace; font-size: 1.15rem; font-weight: 700; padding: 6px 14px; border-radius: 8px; border: 1px solid #334155;" id="classroomTimerDisplay">50:00</div>
+                    <span id="classroomAutoStatusBadge" style="font-size: 0.75rem; background: #d1fae5; color: #065f46; font-weight: 700; padding: 4px 8px; border-radius: 12px;">⚡ Auto-Counting Active</span>
+                    <button class="modal__close" data-close-classroom-modal type="button" style="position: static;">&times;</button>
+                </div>
+            </div>
+
+            <div class="classroom-grid" style="display: grid; grid-template-columns: 1.8fr 1.2fr; gap: 16px; flex: 1; height: calc(100% - 60px); min-height: 0;">
+                <!-- Video Call & Screen Share Window -->
+                <div style="display: flex; flex-direction: column; background: #0f172a; border-radius: var(--radius-md); overflow: hidden; height: 100%; position: relative;">
+                    <div id="classroomVideoContainer" style="width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; color: #fff;">
+                        <p>Loading live video room...</p>
+                    </div>
+                </div>
+
+                <!-- Right Sidebar: Interactive Board, Notes & Teaching Materials -->
+                <div style="display: flex; flex-direction: column; gap: 10px; background: var(--bg-soft); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 12px; height: 100%; overflow: hidden;">
+                    <!-- Classroom Tabs -->
+                    <div style="display: flex; gap: 6px; border-bottom: 1px solid var(--line); padding-bottom: 8px;">
+                        <button type="button" class="btn btn--small btn--primary" id="classroomTabBoardBtn">✏️ Whiteboard</button>
+                        <button type="button" class="btn btn--small btn--ghost" id="classroomTabNotesBtn">📝 Vocabulary & Notes</button>
+                        <button type="button" class="btn btn--small btn--ghost" id="classroomTabMaterialsBtn">📚 Palestinian Materials</button>
+                    </div>
+
+                    <!-- TAB 1: Whiteboard Canvas -->
+                    <div id="classroomBoardTab" style="display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; background: #fff; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--line);">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <input type="color" id="wbColorPicker" value="#0f172a" style="width: 28px; height: 28px; border: none; cursor: pointer; border-radius: 4px;" title="Pick Color" />
+                                <button type="button" class="btn btn--ghost btn--small" id="wbPenBtn" style="padding: 2px 6px;">🖊️ Pen</button>
+                                <button type="button" class="btn btn--ghost btn--small" id="wbHighlighterBtn" style="padding: 2px 6px;">🖍️ Yellow</button>
+                                <button type="button" class="btn btn--ghost btn--small" id="wbEraserBtn" style="padding: 2px 6px;">🧽 Eraser</button>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <button type="button" class="btn btn--ghost btn--small" id="wbClearBtn" style="padding: 2px 6px; color: #ef4444;">🗑️ Clear</button>
+                                <button type="button" class="btn btn--outline btn--small" id="wbSyncBtn" style="padding: 2px 6px;">🔄 Sync Board</button>
+                            </div>
+                        </div>
+
+                        <div style="flex: 1; background: #ffffff; border: 1px solid var(--line); border-radius: 6px; position: relative; overflow: hidden; cursor: crosshair;">
+                            <canvas id="classroomWhiteboard" style="width: 100%; height: 100%; display: block; touch-action: none;"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- TAB 2: Shared Vocabulary & Notes -->
+                    <div id="classroomNotesTab" style="display: none; flex-direction: column; gap: 8px; flex: 1; min-height: 0;">
+                        <p class="small-note" style="margin: 0;">Type Palestinian Arabic phrases and notes shared in real-time:</p>
+                        <textarea id="classroomNotesTextarea" style="width: 100%; flex: 1; font-family: inherit; font-size: 0.92rem; padding: 10px; border-radius: 6px; border: 1px solid var(--line); resize: none;" placeholder="Write new Palestinian Arabic vocabulary, verb patterns, and expressions..."></textarea>
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <button class="btn btn--primary btn--small" type="button" id="saveClassroomNotesBtn">Save Lesson Notes</button>
+                            <span class="small-note" id="notesSavedIndicator">Auto-saves to student history</span>
+                        </div>
+                    </div>
+
+                    <!-- TAB 3: Palestinian Arabic Materials & Curriculum -->
+                    <div id="classroomMaterialsTab" style="display: none; flex-direction: column; gap: 10px; flex: 1; min-height: 0; overflow-y: auto;">
+                        <h5 style="margin: 0;">📚 Palestinian & Levantine Arabic Curriculum</h5>
+                        <div style="display: flex; flex-direction: column; gap: 8px; font-size: 0.85rem;">
+                            <div style="background: #fff; padding: 10px; border-radius: 6px; border: 1px solid var(--line);">
+                                <strong>🗣️ Unit 1: Daily Palestinian Greetings & Small Talk</strong>
+                                <p class="small-note" style="margin: 4px 0 0;">كيف حالك؟ شو في ما في؟ شو أسبارك اليوم؟ / شو بدك تسوي؟</p>
+                            </div>
+                            <div style="background: #fff; padding: 10px; border-radius: 6px; border: 1px solid var(--line);">
+                                <strong>☕ Unit 2: Ordering at Cafes & Restaurants in Jerusalem/Gaza Dialect</strong>
+                                <p class="small-note" style="margin: 4px 0 0;">بدي قهوة سادة بدون سكر / يعطيك العافية قديش الحساب؟</p>
+                            </div>
+                            <div style="background: #fff; padding: 10px; border-radius: 6px; border: 1px solid var(--line);">
+                                <strong>⚡ Unit 3: Verb Conjugations in Spoken Arabic (Past & Present)</strong>
+                                <p class="small-note" style="margin: 4px 0 0;">راح - بروح | حكى - بحكي | شاف - بشوف | عمل - بعمل</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--line); padding-top: 8px;">
+                        <span class="small-note">💾 Changes auto-saved</span>
+                        <p id="classroomStatusMsg" class="status-line" style="margin: 0; font-size: 0.8rem;"></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
 
-    <script>
-        if (window.firebaseConfig) {
-            firebase.initializeApp(window.firebaseConfig);
-            window.auth = firebase.auth();
-            window.db = firebase.firestore();
-        } else {
-            console.warn("Firebase runtime config is missing. App initialization was skipped.");
-        }
-    </script>
+    <script src="./js/firebase-bootstrap.js"></script>
 
-    <script type="module" src="./js/app.js"></script>
+    <script type="module" src="./js/app.js?v=20260727-meet-preply-v16"></script>
 </body>
 
 </html>

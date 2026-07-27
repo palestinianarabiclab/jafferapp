@@ -92,7 +92,9 @@ async function callAppsScript(action, payload = {}, { allowGet = false } = {}) {
     }
 
     try {
-        const body = { action, ...payload };
+        const currentUser = window.firebase?.auth()?.currentUser;
+        const authToken = allowGet || !currentUser ? "" : await currentUser.getIdToken();
+        const body = { action, ...payload, ...(authToken ? { authToken } : {}) };
         const requestUrl = allowGet ? `${webAppUrl}?${toQueryString(body)}` : webAppUrl;
         const res = await fetchWithTimeout(
             requestUrl,
@@ -103,7 +105,7 @@ async function callAppsScript(action, payload = {}, { allowGet = false } = {}) {
                     headers: { "Content-Type": "text/plain;charset=utf-8" },
                     body: JSON.stringify(body),
                 },
-            allowGet ? 15000 : 12000
+            allowGet ? 15000 : 30000
         );
         return parseAppsScriptResponse(res);
     } catch (err) {
@@ -161,24 +163,36 @@ async function testAppsScriptConnection() {
     return callAppsScript("test", {}, { allowGet: true });
 }
 
-async function fetchBusyBlocksFromAppsScript({ days = 30, timeZone = "Africa/Cairo" } = {}) {
-    return callAppsScript("getBusy", { days, timeZone }, { allowGet: true });
+async function fetchBusyBlocksFromAppsScript({ days = 30, timeZone = "Africa/Cairo", includeTeacherDetails = false } = {}) {
+    return callAppsScript(
+        includeTeacherDetails ? "getTeacherBusy" : "getBusy",
+        { days, timeZone },
+        { allowGet: !includeTeacherDetails }
+    );
+}
+
+async function createBusyBlockViaAppsScript({ slot, durationMinutes = 60, title = "Busy" } = {}) {
+    return callAppsScript("createBusyBlock", { slot, durationMinutes, title });
+}
+
+async function sendReviewRequestViaAppsScript({ studentId, siteUrl } = {}) {
+    return callAppsScript("sendReviewRequest", { studentId, siteUrl });
+}
+
+async function getPreplyStatisticsViaAppsScript({ days = 730 } = {}) {
+    return callAppsScript("getPreplyStatistics", { days });
 }
 
 async function getAppsScriptEmailQuota() {
-    return callAppsScript("getEmailQuota", {}, { allowGet: true });
+    return callAppsScript("getEmailQuota");
 }
 
 async function installLessonReminderTrigger() {
-    return callAppsScript("installReminderTrigger", {}, { allowGet: true });
+    return callAppsScript("installReminderTrigger");
 }
 
 async function sendLessonReminderCheck() {
-    return callAppsScript("sendReminderCheck", {}, { allowGet: true });
-}
-
-async function reconcileBalancesViaAppsScript() {
-    return callAppsScript("reconcileBalances", {}, { allowGet: true });
+    return callAppsScript("sendReminderCheck");
 }
 
 async function createBookingViaAppsScript(payload) {
@@ -187,6 +201,10 @@ async function createBookingViaAppsScript(payload) {
 
 async function deleteBookingViaAppsScript(payload) {
     return callAppsScript("deleteBooking", payload);
+}
+
+async function rescheduleBookingViaAppsScript(payload) {
+    return callAppsScript("rescheduleBooking", payload);
 }
 
 async function syncPendingBookingsViaAppsScript({ limit = 10 } = {}) {
@@ -207,7 +225,32 @@ async function syncPendingBookingsViaAppsScript({ limit = 10 } = {}) {
         const failedDetails = [];
         for (const doc of pendingDocs) {
             const booking = doc.data();
-            if (!booking || !booking.slot || booking.status === "canceled") continue;
+            if (!booking || !booking.slot) continue;
+            if (booking.status === "canceled") {
+                if (!booking.calendarDeletePending) continue;
+                const deleteResult = await deleteBookingViaAppsScript({
+                    bookingId: doc.id,
+                    eventId: booking.googleCalendarEventId || "",
+                    slot: booking.slot,
+                    canceledBy: booking.canceledBy || "Teacher",
+                });
+                if (deleteResult?.success) {
+                    await window.db.collection("bookings").doc(doc.id).set({
+                        calendarDeletePending: false,
+                        updatedAt: Date.now(),
+                        history: window.firebase.firestore.FieldValue.arrayUnion({
+                            at: Date.now(),
+                            action: "calendar-deletion-synced",
+                            by: "system",
+                        }),
+                    }, { merge: true });
+                    syncedCount += 1;
+                } else {
+                    failedCount += 1;
+                    failedDetails.push(`${booking.name || booking.email || "Canceled booking"}: ${deleteResult?.message || "Calendar deletion failed"}`);
+                }
+                continue;
+            }
             const result = await createBookingViaAppsScript({
                 bookingId: doc.id,
                 slot: booking.slot,
@@ -223,6 +266,7 @@ async function syncPendingBookingsViaAppsScript({ limit = 10 } = {}) {
                 await window.db.collection("bookings").doc(doc.id).set({
                     calendarSynced: true,
                     googleCalendarEventId: result.eventId || null,
+                    meetingUrl: result.meetingUrl || "",
                     history: window.firebase.firestore.FieldValue.arrayUnion({
                         at: Date.now(),
                         action: "apps_script_synced",
@@ -258,10 +302,13 @@ async function syncPendingBookingsViaAppsScript({ limit = 10 } = {}) {
 window.saveAppsScriptSettings = saveAppsScriptSettings;
 window.testAppsScriptConnection = testAppsScriptConnection;
 window.fetchBusyBlocksFromAppsScript = fetchBusyBlocksFromAppsScript;
+window.createBusyBlockViaAppsScript = createBusyBlockViaAppsScript;
+window.sendReviewRequestViaAppsScript = sendReviewRequestViaAppsScript;
+window.getPreplyStatisticsViaAppsScript = getPreplyStatisticsViaAppsScript;
 window.getAppsScriptEmailQuota = getAppsScriptEmailQuota;
 window.installLessonReminderTrigger = installLessonReminderTrigger;
 window.sendLessonReminderCheck = sendLessonReminderCheck;
-window.reconcileBalancesViaAppsScript = reconcileBalancesViaAppsScript;
 window.createBookingViaAppsScript = createBookingViaAppsScript;
 window.deleteBookingViaAppsScript = deleteBookingViaAppsScript;
+window.rescheduleBookingViaAppsScript = rescheduleBookingViaAppsScript;
 window.syncPendingBookingsViaAppsScript = syncPendingBookingsViaAppsScript;

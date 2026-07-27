@@ -89,13 +89,16 @@ class ErrorHandler {
 
     async logToService(error, context) {
         try {
-            if (window.db) {
+            const user = window.auth?.currentUser || null;
+            if (window.db && user) {
                 await window.db.collection("errorLogs").add({
                     timestamp: new Date().toISOString(),
-                    error: error?.message || String(error),
-                    context,
-                    stack: error?.stack,
-                    userAgent: navigator.userAgent,
+                    error: String(error?.message || error || "").slice(0, 1000),
+                    context: String(context || "").slice(0, 200),
+                    stack: String(error?.stack || "").slice(0, 4000),
+                    userAgent: String(navigator.userAgent || "").slice(0, 500),
+                    uid: user.uid,
+                    email: user.email || "",
                 });
             }
         } catch (e) {

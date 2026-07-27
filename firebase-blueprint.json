@@ -1,0 +1,86 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile in the application",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "role": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" },
+        "hasSubmittedReview": { "type": "boolean" }
+      }
+    },
+    "Review": {
+      "title": "Review",
+      "description": "Student or Preply review",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "country": { "type": "string" },
+        "rating": { "type": "number" },
+        "tag": { "type": "string" },
+        "date": { "type": "string" },
+        "text": { "type": "string" },
+        "avatar": { "type": "string" },
+        "source": { "type": "string" },
+        "studentUid": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["name", "rating", "text"]
+    },
+    "TeacherProfile": {
+      "title": "TeacherProfile",
+      "description": "Primary teacher profile info",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "headline": { "type": "string" },
+        "bioText": { "type": "string" },
+        "updatedAt": { "type": "number" }
+      }
+    },
+    "Booking": {
+      "title": "Booking",
+      "description": "Student lesson booking",
+      "type": "object",
+      "properties": {
+        "slot": { "type": "number" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "status": { "type": "string" },
+        "studentUid": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles"
+    },
+    "/reviews/{docId}": {
+      "schema": { "$ref": "#/entities/Review" },
+      "description": "Student and imported reviews"
+    },
+    "/teacherProfile/{docId}": {
+      "schema": { "$ref": "#/entities/TeacherProfile" },
+      "description": "Teacher profile settings"
+    },
+    "/bookings/{docId}": {
+      "schema": { "$ref": "#/entities/Booking" },
+      "description": "Private booking records"
+    },
+    "/publicBookings/{docId}": {
+      "schema": { "$ref": "#/entities/Booking" },
+      "description": "Public booking availability blocks"
+    },
+    "/errorLogs/{docId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Client error logs"
+    }
+  }
+}

@@ -10,37 +10,70 @@ import {
     buildWhatsAppUrl,
 } from "./logic/contactSettingsStore.js";
 import {
-    loadBookingStatusByEmail,
     submitGuestBooking,
-} from "./logic/guestBookingFlow.js";
+} from "./logic/guestBookingFlow.js?v=20260725-firestore-sync-v3";
 import {
     renderTeacherBookings,
     cancelBooking,
+    deleteCanceledBooking,
     rescheduleBooking,
+    resizeBookingDuration,
     clearAllBookings,
-} from "./logic/teacherBookingAdmin.js";
+} from "./logic/teacherBookingAdmin.js?v=20260726-trial-cancel-v3";
 import {
     bootstrapTeacherAccess,
     resolveUserRole,
 } from "./logic/authFlows.js";
 import {
+    MIN_BOOKING_LEAD_MINUTES,
     getSchedulableSlots,
     getAvailableSlots,
+    getBookedSlotsMap,
     findBookingConflict,
     addDaysToDateKey,
     getZonedParts,
     zonedDateTimeToUtcMs,
 } from "./logic/bookingAvailability.js";
+import {
+    getLessonAccessState,
+} from "./logic/lessonAccess.js";
+import {
+    createInitialProfileSettings,
+    createInitialReviews,
+    loadLocalProfileSettings,
+    saveLocalProfileSettings,
+    loadCloudProfileSettings,
+    saveCloudProfileSettings,
+    loadLocalReviews,
+    saveLocalReviews,
+    loadCloudReviews,
+    addReviewToCloud,
+    deleteReviewFromCloud,
+} from "./logic/profileAndReviewsStore.js";
 
 const DAY_KEYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const DEFAULT_TIMEZONE = "Africa/Cairo";
-const GOOGLE_BUSY_REFRESH_MS = 60000;
+const GOOGLE_BUSY_REFRESH_MS = 5 * 60 * 1000;
 const STUDENT_CHANGE_CUTOFF_MS = 12 * 60 * 60 * 1000;
 const BUSY_BLOCKS_CACHE_MS = 60000;
+const LESSON_FEEDBACK_BASELINE = {
+    studentCount: 93,
+    averages: {
+        reassurance: 4.9,
+        clarity: 5.0,
+        progress: 4.9,
+        preparation: 4.9,
+    },
+};
 
 const state = {
     bookingSettings: ensureBookingSettingsShape(createInitialBookingSettings()),
     contactSettings: createInitialContactSettings(),
+    profileSettings: loadLocalProfileSettings("teacher_profile_v1", createInitialProfileSettings()),
+    reviews: loadLocalReviews("teacher_reviews_v1", createInitialReviews()),
+    reviewsSortMode: "newest",
+    reviewsExpanded: false,
+    selectedPackage: { lessons: 10, price: 135, label: "10 Lessons ($135)" },
     runtimeBusyBlocks: [],
     selectedSlotMs: null,
     selectedDateKey: "",
@@ -53,11 +86,30 @@ const state = {
     teacherUser: null,
     teacherRole: "",
     bookingCache: new Map(),
+    teacherCalendarWeekOffset: 0,
+    teacherCalendarView: "week",
+    teacherCalendarDrag: null,
+    teacherCalendarResize: null,
+    teacherCalendarTouch: null,
+    studentBookingsUnsubscribe: null,
+    teacherRevenueTotal: 0,
     studentCache: new Map(),
     googleCalendarMessage: "",
+    googleCalendarConnected: false,
     busyRefreshTimer: null,
     balanceReconcileTimer: null,
     studentProfileUnsubscribe: null,
+    lessonFeedbackRatings: {
+        preparation: 0,
+        clarity: 0,
+        reassurance: 0,
+        progress: 0,
+    },
+    lessonFeedbackDismissedBookingId: "",
+    pendingLessonFeedbackBooking: null,
+    lessonFeedbackSummaryUnsubscribe: null,
+    teacherLessonFeedbackUnsubscribe: null,
+    teacherLessonFeedbackRefreshTimer: null,
     busyRefreshInFlight: null,
     googleCalendarModuleLoading: null,
     publicSettingsLoaded: false,
@@ -97,10 +149,22 @@ function cacheDom() {
         "bookingDayLabel",
         "bookingWeeklyGrid",
         "bookingEmptyState",
+        "studentTimezoneSelect",
+        "selectedTimezoneName",
+        "selectedTimezoneOffset",
+        "viewFullScheduleRow",
+        "viewFullScheduleBtn",
         "bookingInfo",
         "selectedTimeDisplay",
         "bookingForm",
         "bookingAccountSummary",
+        "studentPaypalReminder",
+        "studentPaypalLink",
+        "studentPaymentCard",
+        "studentPaymentOpenBtn",
+        "studentPaymentCloseBtn",
+        "requestCourseAccessBtn",
+        "courseAccessRequestMsg",
         "studentBalanceCard",
         "studentBalanceValue",
         "studentLessonPriceValue",
@@ -123,6 +187,12 @@ function cacheDom() {
         "studentAuthSubmit",
         "studentForgotPasswordBtn",
         "studentLogoutBtn",
+        "studentDeleteAccountBtn",
+        "studentDeleteAccountModal",
+        "studentDeleteAccountForm",
+        "studentDeleteAccountPassword",
+        "studentDeleteAccountConfirmBtn",
+        "studentDeleteAccountMsg",
         "studentAuthMsg",
         "bookingStatusEmail",
         "bookingStatusBtn",
@@ -132,6 +202,8 @@ function cacheDom() {
         "contactEmailBtn",
         "bookingSuccessModal",
         "bookingSuccessText",
+        "bookingSuccessWhatsAppBtn",
+        "bookingSuccessTrialIntro",
         "rescheduleModal",
         "rescheduleModalHint",
         "rescheduleWeekPrev",
@@ -144,6 +216,8 @@ function cacheDom() {
         "rescheduleMsg",
         "rescheduleConfirmBtn",
         "openStudentGateBtn",
+        "bookFreeTrialBtn",
+        "welcomeWhatsappBtn",
         "openTeacherGateBtn",
         "teacherLoginModal",
         "teacherLoginForm",
@@ -163,10 +237,83 @@ function cacheDom() {
         "availabilityForm",
         "availabilityMsg",
         "teacherResetAvailabilityBtn",
+        "courseOffersForm",
+        "courseAccessPrice",
+        "courseAccessUnits",
+        "freeTrialLessons",
+        "paypalPaymentLink",
+        "paypalReminder",
+        "courseOffersMsg",
         "contactSettingsForm",
         "teacherWhatsapp",
         "teacherContactEmail",
+        "teacherClassroomMeetingUrl",
         "contactMsg",
+        "preplyTeacherName",
+        "preplyArabicName",
+        "preplyTeacherHeadline",
+        "preplyAverageRatingLabel",
+        "preplyReviewCountBadge",
+        "preplyHoursBadge",
+        "preplyStudentsBadge",
+        "preplyQuoteArabic",
+        "preplyBioText",
+        "bioFadeOverlay",
+        "preplyBioToggleBtn",
+        "preplyBioToggleText",
+        "preplyBioToggleChevron",
+        "preplyReviewCountHeader",
+        "preplyAverageScoreText",
+        "preplyReviewsGrid",
+        "preplyReviewsSort",
+        "studentReviewsToggleBtn",
+        "preplyRateDisplay",
+        "preplyAvatarContainer",
+        "preplyVideoContainer",
+        "preplyPlayVideoBtn",
+        "studentReviewCard",
+        "studentReviewForm",
+        "studentRatingSelect",
+        "studentReviewCountry",
+        "studentReviewTag",
+        "studentReviewText",
+        "studentReviewSubmit",
+        "studentReviewMsg",
+        "studentReviewSuccessBox",
+        "lessonFeedbackCard",
+        "lessonFeedbackForm",
+        "lessonFeedbackBookingId",
+        "lessonFeedbackLessonLabel",
+        "lessonFeedbackComment",
+        "lessonFeedbackSubmit",
+        "lessonFeedbackLater",
+        "lessonFeedbackClose",
+        "lessonFeedbackReminder",
+        "lessonFeedbackMsg",
+        "lessonRatingSummary",
+        "lessonRatingSummaryGrid",
+        "lessonRatingSummaryCount",
+        "teacherLessonFeedbackCount",
+        "teacherLessonFeedbackMetrics",
+        "teacherLessonFeedbackComments",
+        "teacherProfileForm",
+        "teacherProfileNameInput",
+        "teacherProfileRateInput",
+        "teacherProfileHeadlineInput",
+        "teacherProfileAvatarUrlInput",
+        "teacherProfileAvatarFileInput",
+        "teacherProfileVideoUrlInput",
+        "teacherProfileHoursInput",
+        "teacherProfileStudentsInput",
+        "teacherProfileQuoteInput",
+        "teacherProfileBioInput",
+        "saveTeacherProfileBtn",
+        "teacherProfileMsg",
+        "togglePublicReviewsBtn",
+        "toggleAdminReviewsListBtn",
+        "studentReviewsSection",
+        "teacherReviewsCountLabel",
+        "teacherReviewsAdminList",
         "appsScriptForm",
         "teacherAppsScriptUrl",
         "appsScriptMsg",
@@ -177,6 +324,8 @@ function cacheDom() {
         "appsScriptInstallReminderBtn",
         "appsScriptReminderCheckBtn",
         "appsScriptBalanceCheckBtn",
+        "appsScriptPreplyStatsBtn",
+        "preplyStatsSummary",
         "appsScriptEmailQuota",
         "appsScriptEmailQuotaValue",
         "exceptionForm",
@@ -204,6 +353,12 @@ function cacheDom() {
         "googleTestPreplyBtn",
         "teacherPreplyCalendarId",
         "savePreplyBtn",
+        "teacherPackagesForm",
+        "teacherPackagesContainer",
+        "teacherAddPackageBtn",
+        "teacherPackagesMsg",
+        "googleSyncIndicator",
+        "googleSyncTime",
     ].forEach((id) => {
         els[id] = qs(id);
     });
@@ -249,7 +404,7 @@ function loadScriptOnce(src) {
 async function ensureGoogleCalendarModuleLoaded() {
     if (window.connectToGoogleCalendar && window.importGoogleCalendarEventsToBusyBlocks) return;
     if (!state.googleCalendarModuleLoading) {
-        state.googleCalendarModuleLoading = loadScriptOnce("./js/google-calendar.js").finally(() => {
+        state.googleCalendarModuleLoading = loadScriptOnce("./js/google-calendar.js?v=20260726-auth-v3").finally(() => {
             state.googleCalendarModuleLoading = null;
         });
     }
@@ -258,8 +413,12 @@ async function ensureGoogleCalendarModuleLoaded() {
 
 function setStatus(element, message, tone = "") {
     if (!element) return;
+    element.classList.remove("is-appearing", "is-error", "is-success");
     element.textContent = message || "";
-    element.classList.remove("is-error", "is-success");
+    if (message) {
+        void element.offsetWidth; // Force layout reflow to restart CSS fade-in animation
+        element.classList.add("is-appearing");
+    }
     if (tone === "error") element.classList.add("is-error");
     if (tone === "success") element.classList.add("is-success");
 }
@@ -365,8 +524,103 @@ function getTeacherTimezone() {
     return state.bookingSettings.timezone || DEFAULT_TIMEZONE;
 }
 
+function formatTimezoneGmt(timeZone) {
+    try {
+        const parts = Intl.DateTimeFormat('en-US', {
+            timeZone,
+            timeZoneName: 'longOffset'
+        }).formatToParts(new Date());
+        const offset = parts.find(p => p.type === 'timeZoneName')?.value || 'GMT';
+        if (offset === 'GMT') return 'GMT +0:00';
+        return offset.replace('GMT', 'GMT ').replace(/\+0/g, '+').replace(/\-0/g, '-');
+    } catch {
+        return 'GMT';
+    }
+}
+
 function getDisplayTimezone() {
-    return getLocalTimezone();
+    return state.studentTimezone || getLocalTimezone();
+}
+
+function initializeStudentTimezoneSelector() {
+    if (!els.studentTimezoneSelect) return;
+
+    const localTz = getLocalTimezone();
+    let allTimezones = [];
+
+    try {
+        if (typeof Intl !== "undefined" && typeof Intl.supportedValuesOf === "function") {
+            allTimezones = Intl.supportedValuesOf("timeZone");
+        }
+    } catch (e) {
+        console.warn("Intl.supportedValuesOf is not supported, using fallback.", e);
+    }
+
+    if (!allTimezones || allTimezones.length === 0) {
+        // High-quality, robust fallback list of major world timezones across all regions
+        allTimezones = [
+            "Africa/Algiers", "Africa/Cairo", "Africa/Casablanca", "Africa/Harare", "Africa/Johannesburg", "Africa/Nairobi",
+            "America/Anchorage", "America/Argentina/Buenos_Aires", "America/Bogota", "America/Caracas", "America/Chicago",
+            "America/Denver", "America/Halifax", "America/Los_Angeles", "America/Mexico_City", "America/New_York",
+            "America/Phoenix", "America/Santiago", "America/Sao_Paulo", "America/St_Johns", "America/Toronto", "America/Vancouver",
+            "Asia/Almaty", "Asia/Amman", "Asia/Baghdad", "Asia/Baku", "Asia/Bangkok", "Asia/Beirut", "Asia/Cairo",
+            "Asia/Colombo", "Asia/Damascus", "Asia/Dhaka", "Asia/Dubai", "Asia/Gaza", "Asia/Hong_Kong", "Asia/Jakarta",
+            "Asia/Jerusalem", "Asia/Kabul", "Asia/Karachi", "Asia/Kolkata", "Asia/Kuwait", "Asia/Manila", "Asia/Nicosia",
+            "Asia/Qatar", "Asia/Riyadh", "Asia/Seoul", "Asia/Shanghai", "Asia/Singapore", "Asia/Taipei", "Asia/Tashkent",
+            "Asia/Tbilisi", "Asia/Tehran", "Asia/Tokyo", "Asia/Yerevan",
+            "Atlantic/Azores", "Atlantic/Canary",
+            "Australia/Adelaide", "Australia/Brisbane", "Australia/Darwin", "Australia/Melbourne", "Australia/Perth", "Australia/Sydney",
+            "Europe/Amsterdam", "Europe/Athens", "Europe/Belgrade", "Europe/Berlin", "Europe/Brussels", "Europe/Bucharest",
+            "Europe/Budapest", "Europe/Copenhagen", "Europe/Dublin", "Europe/Helsinki", "Europe/Istanbul", "Europe/Kiev",
+            "Europe/Lisbon", "Europe/London", "Europe/Madrid", "Europe/Moscow", "Europe/Oslo", "Europe/Paris", "Europe/Prague",
+            "Europe/Rome", "Europe/Stockholm", "Europe/Vienna", "Europe/Warsaw", "Europe/Zurich",
+            "Pacific/Auckland", "Pacific/Chatham", "Pacific/Fiji", "Pacific/Honolulu", "Pacific/Kiritimati", "Pacific/Pago_Pago"
+        ];
+    }
+
+    // De-duplicate just in case, and ensure the local timezone is present
+    const uniqueTzSet = new Set(allTimezones);
+    if (localTz) {
+        uniqueTzSet.add(localTz);
+    }
+
+    const sortedTimezones = Array.from(uniqueTzSet).sort((a, b) => a.localeCompare(b));
+
+    els.studentTimezoneSelect.innerHTML = "";
+
+    sortedTimezones.forEach((tz) => {
+        const option = document.createElement("option");
+        option.value = tz;
+
+        // Human-friendly representation of the timezone name
+        const displayTzName = tz.replace(/_/g, " ");
+        option.textContent = `${displayTzName} (${formatTimezoneGmt(tz)})`;
+        if (tz === (state.studentTimezone || localTz)) {
+            option.selected = true;
+        }
+        els.studentTimezoneSelect.appendChild(option);
+    });
+
+    const activeTz = state.studentTimezone || localTz;
+    if (els.selectedTimezoneName) {
+        els.selectedTimezoneName.textContent = activeTz.replace(/_/g, " ");
+    }
+    if (els.selectedTimezoneOffset) {
+        els.selectedTimezoneOffset.textContent = formatTimezoneGmt(activeTz);
+    }
+
+    // Update auto-detection visual state badge
+    const badgeEl = document.getElementById("timezoneAutoBadge");
+    const labelEl = document.getElementById("timezoneAutoLabel");
+    const isLocal = activeTz === localTz;
+
+    if (badgeEl) {
+        badgeEl.style.backgroundColor = isLocal ? "#10b981" : "#f59e0b"; // green for auto-detected, amber for custom override
+    }
+    if (labelEl) {
+        labelEl.textContent = isLocal ? "Device Timezone" : "Custom Timezone";
+        labelEl.style.color = isLocal ? "#059669" : "#d97706";
+    }
 }
 
 function formatSlotTime(ts) {
@@ -431,14 +685,6 @@ function getModalCustomSlotMs() {
     return zonedDateTimeToUtcMs(getTeacherTimezone(), year, month, day, hour, minute);
 }
 
-function hashEmail(email) {
-    const normalized = String(email || "").trim().toLowerCase();
-    const encoder = new TextEncoder();
-    return crypto.subtle.digest("SHA-256", encoder.encode(normalized)).then((buffer) =>
-        Array.from(new Uint8Array(buffer)).map((b) => b.toString(16).padStart(2, "0")).join("")
-    );
-}
-
 function normalizePhoneNumber() {
     const prefix = (els.studentPhoneCountry?.value || "").trim();
     const raw = (els.studentPhone?.value || "").replace(/[^0-9]/g, "");
@@ -465,10 +711,12 @@ function toMoneyValue(value) {
 }
 
 function formatMoney(value) {
-    return toMoneyValue(value).toLocaleString([], {
+    const val = toMoneyValue(value);
+    const absStr = Math.abs(val).toLocaleString([], {
         minimumFractionDigits: 0,
         maximumFractionDigits: 2,
     });
+    return val < 0 ? `-$${absStr}` : `$${absStr}`;
 }
 
 function getStudentBalance() {
@@ -485,12 +733,148 @@ function updateStudentBalanceUi() {
         els.studentBalanceCard.hidden = !signedIn;
     }
     if (!signedIn) return;
+
+    const balance = getStudentBalance();
+    const lessonPrice = getStudentLessonPrice() > 0 ? getStudentLessonPrice() : 15;
+
     if (els.studentBalanceValue) {
-        els.studentBalanceValue.textContent = formatMoney(getStudentBalance());
+        els.studentBalanceValue.textContent = formatMoney(balance);
     }
+
     if (els.studentLessonPriceValue) {
-        const price = getStudentLessonPrice();
-        els.studentLessonPriceValue.textContent = price ? `Lesson price: ${formatMoney(price)}` : "Lesson price: not set";
+        els.studentLessonPriceValue.textContent = `Your lesson price: ${formatMoney(lessonPrice)}`;
+    }
+
+    const remainingBadge = document.getElementById("studentRemainingLessonsBadge");
+    if (remainingBadge) {
+        const remainingLessons = balance >= 0 ? Math.floor(balance / lessonPrice) : Math.ceil(balance / lessonPrice);
+        if (remainingLessons > 0) {
+            remainingBadge.textContent = `(${remainingLessons} lesson${remainingLessons === 1 ? "" : "s"} remaining)`;
+            remainingBadge.style.background = "var(--primary)";
+        } else if (remainingLessons < 0) {
+            remainingBadge.textContent = `(Overdue by ${Math.abs(remainingLessons)} lesson${Math.abs(remainingLessons) === 1 ? "" : "s"})`;
+            remainingBadge.style.background = "#ef4444";
+        } else {
+            remainingBadge.textContent = `(0 lessons remaining)`;
+            remainingBadge.style.background = "var(--ink-light)";
+        }
+    }
+
+    const trialNotice = document.getElementById("studentTrialNotice");
+    if (trialNotice) {
+        const profile = state.studentProfile || {};
+        if (profile.trialUsed !== true) {
+            trialNotice.hidden = false;
+            trialNotice.style.display = "block";
+        } else {
+            trialNotice.hidden = true;
+            trialNotice.style.display = "none";
+        }
+    }
+
+    const transactionsList = document.getElementById("studentTransactionsList");
+    if (transactionsList) {
+        const profile = state.studentProfile || {};
+        const txs = profile.transactions || [];
+        if (!txs.length) {
+            transactionsList.innerHTML = `<div class="small-note" style="text-align: center; color: var(--ink-light); padding: 10px 0;">No financial transactions recorded yet.</div>`;
+        } else {
+            const sortedTxs = [...txs].sort((a, b) => b.at - a.at);
+            transactionsList.innerHTML = sortedTxs.map((tx) => {
+                const isCredit = tx.amount > 0;
+                const amountSign = isCredit ? `+$${tx.amount.toFixed(2)}` : (tx.amount === 0 ? "Free" : `-$${Math.abs(tx.amount).toFixed(2)}`);
+                const amountStyle = isCredit
+                    ? "color: #059669; font-weight: 700;"
+                    : (tx.amount === 0 ? "color: #2563eb; font-weight: 700;" : "color: #dc2626; font-weight: 700;");
+                const dateStr = new Date(tx.at).toLocaleString("en-US", {
+                    weekday: "short",
+                    year: "numeric",
+                    month: "short",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    hour12: true
+                });
+                const timeActionLabel = isCredit ? "Added on" : "Charged on";
+                return `
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--line); padding: 8px 0; gap: 8px;">
+                        <div>
+                           <div style="font-weight: 600; color: var(--ink); text-align: left;">${escapeHtml(tx.description)}</div>
+                           <div style="font-size: 0.75rem; color: var(--muted); margin-top: 2px;">📅 ${timeActionLabel}: ${dateStr}</div>
+                        </div>
+                        <div style="text-align: right; min-width: 90px;">
+                           <span style="${amountStyle}">${amountSign}</span>
+                           <div style="font-size: 0.75rem; color: var(--muted); font-weight: 500; margin-top: 2px;">Balance: $${tx.newBalance.toFixed(2)}</div>
+                        </div>
+                    </div>
+                `;
+            }).join("");
+        }
+    }
+}
+
+function updateCourseAccessRequestUi() {
+    const signedIn = isStudentSignedIn();
+    const studentProfile = state.studentProfile || {};
+    const balance = Number(studentProfile.balance || 0);
+    const requested = studentProfile.courseAccessRequested === true || studentProfile.paymentStatus === "pending";
+    const requestedPkg = studentProfile.requestedPackage || "Lesson Package";
+
+    const requestBtn = document.getElementById("requestCourseAccessBtn");
+    const msgEl = document.getElementById("courseAccessRequestMsg");
+
+    if (requestBtn) {
+        requestBtn.disabled = !signedIn;
+        requestBtn.textContent = requested
+            ? "⚡ Request Pending Approval"
+            : "📩 Notify Teacher (Request Credit Addition)";
+    }
+
+    if (msgEl) {
+        if (!signedIn) {
+            msgEl.textContent = "Sign in first to choose a package and request account credit.";
+            msgEl.className = "status-line";
+        } else if (balance > 0) {
+            const lessonPrice = Number(studentProfile.lessonPrice) > 0 ? Number(studentProfile.lessonPrice) : 15;
+            const remainingLessons = Math.floor(balance / lessonPrice);
+            msgEl.textContent = `Active Credit Balance: $${balance.toFixed(2)} (~${remainingLessons} lesson${remainingLessons === 1 ? "" : "s"} remaining).`;
+            msgEl.className = "status-line status-line--success";
+        } else if (requested) {
+            msgEl.textContent = `⏳ Payment notification sent for ${requestedPkg}. Waiting for teacher verification.`;
+            msgEl.className = "status-line status-line--warning";
+        } else {
+            msgEl.textContent = "Select a package above and click notify once you send payment.";
+            msgEl.className = "status-line";
+        }
+    }
+}
+
+async function requestFullCourseAccess() {
+    if (!isStudentSignedIn()) {
+        els.studentAuthModal?.classList.add("modal--open");
+        const msgEl = document.getElementById("courseAccessRequestMsg");
+        if (msgEl) setStatus(msgEl, "Please sign in or create an account first to request a package.", "error");
+        return;
+    }
+    const pkg = state.selectedPackage || { lessons: 10, price: 135, label: "10 Lessons ($135)" };
+    const msgEl = document.getElementById("courseAccessRequestMsg");
+
+    await window.db.collection("users").doc(state.currentUser.uid).set({
+        email: state.currentUser.email || "",
+        name: getStudentName(),
+        role: "student",
+        courseAccessRequested: true,
+        courseAccessRequestedAt: Date.now(),
+        requestedPackage: pkg.label,
+        requestedAmount: pkg.price,
+        requestedLessons: pkg.lessons,
+        paymentStatus: "pending",
+        paymentNote: `Student notified payment for ${pkg.label}.`,
+        updatedAt: window.firebase.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    if (msgEl) {
+        setStatus(msgEl, `✅ Notification sent to teacher for ${pkg.label}! Once verified, your account balance will be credited.`, "success");
     }
 }
 
@@ -565,7 +949,11 @@ function updateStudentAuthUi() {
     if (els.studentLogoutBtn) {
         els.studentLogoutBtn.hidden = !signedIn;
     }
+    if (els.studentDeleteAccountBtn) {
+        els.studentDeleteAccountBtn.hidden = !signedIn;
+    }
     updateStudentBalanceUi();
+    updateCourseAccessRequestUi();
     updateBookingSubmitState();
 }
 
@@ -730,19 +1118,30 @@ async function refreshRuntimeBusyBlocksNow({ force = false, minDays = 0 } = {}) 
         state.busyBlocksRangeDays = 0;
         state.busySyncReady = false;
         state.busySyncMessage = "Calendar sync is not available right now.";
+        updateSystemSyncStatusIndicator();
         return;
     }
-    const result = await window.fetchBusyBlocksFromAppsScript({
-        days: requestedDays,
-        timeZone: getTeacherTimezone(),
-    });
-    state.busySyncReady = !!(result?.success && Array.isArray(result.busyBlocks));
-    state.busySyncMessage = state.busySyncReady ? "" : (result?.message || "Could not reach Google Calendar sync.");
-    state.runtimeBusyBlocks = state.busySyncReady
-        ? [...result.busyBlocks].sort((a, b) => Number(a.startMs || 0) - Number(b.startMs || 0))
-        : [];
-    state.busyBlocksRangeDays = state.busySyncReady ? requestedDays : 0;
-    state.busyBlocksFetchedAt = Date.now();
+    try {
+        const result = await window.fetchBusyBlocksFromAppsScript({
+            days: requestedDays,
+            timeZone: getTeacherTimezone(),
+            includeTeacherDetails: state.teacherRole === "teacher",
+        });
+        state.busySyncReady = !!(result?.success && Array.isArray(result.busyBlocks));
+        state.busySyncMessage = state.busySyncReady ? "" : (result?.message || "Could not reach Google Calendar sync.");
+        state.runtimeBusyBlocks = state.busySyncReady
+            ? [...result.busyBlocks].sort((a, b) => Number(a.startMs || 0) - Number(b.startMs || 0))
+            : [];
+        state.busyBlocksRangeDays = state.busySyncReady ? requestedDays : 0;
+        state.busyBlocksFetchedAt = Date.now();
+    } catch (err) {
+        state.busySyncReady = false;
+        state.busySyncMessage = err?.message || "Could not connect to Google Calendar sync.";
+        state.runtimeBusyBlocks = [];
+        state.busyBlocksRangeDays = 0;
+        state.busyBlocksFetchedAt = Date.now();
+    }
+    updateSystemSyncStatusIndicator();
 }
 
 async function refreshGoogleBusyAndCalendar({ silent = true } = {}) {
@@ -765,10 +1164,17 @@ async function refreshGoogleBusyAndCalendar({ silent = true } = {}) {
 function startGoogleBusyAutoRefresh() {
     if (state.busyRefreshTimer) return;
     state.busyRefreshTimer = window.setInterval(() => {
+        if (document.hidden) return;
         const studentScreen = document.getElementById("student-screen");
         if (!studentScreen?.classList.contains("app-screen--active")) return;
         ensureBookingCalendarLoaded({ force: true }).catch(console.error);
     }, GOOGLE_BUSY_REFRESH_MS);
+}
+
+function stopGoogleBusyAutoRefresh() {
+    if (!state.busyRefreshTimer) return;
+    window.clearInterval(state.busyRefreshTimer);
+    state.busyRefreshTimer = null;
 }
 
 async function loadPublicSettings({ force = false } = {}) {
@@ -789,7 +1195,9 @@ async function loadPublicSettings({ force = false } = {}) {
             whatsapp: typeof publicData.whatsapp === "string" ? publicData.whatsapp : "",
             email: typeof publicData.contactEmail === "string" ? publicData.contactEmail : "",
             sitePrice: typeof publicData.sitePrice === "string" ? publicData.sitePrice : "",
+            classroomMeetingUrl: typeof publicData.classroomMeetingUrl === "string" ? publicData.classroomMeetingUrl : "",
         };
+        updateStudentOfferUi();
         window.bookingSettings = state.bookingSettings;
         state.publicSettingsLoaded = true;
     })();
@@ -797,6 +1205,117 @@ async function loadPublicSettings({ force = false } = {}) {
         await state.publicSettingsInFlight;
     } finally {
         state.publicSettingsInFlight = null;
+    }
+}
+
+function updateStudentOfferUi() {
+    const offers = state.bookingSettings.courseOffers || {};
+    const lessonPrice = toMoneyValue(offers.courseAccessPrice || 10) || 10;
+    const rateText = `Regular rate: $${lessonPrice} / 50 min`;
+    const lessonRateDisplay = document.getElementById("lessonRateDisplay");
+    if (lessonRateDisplay) lessonRateDisplay.textContent = rateText;
+    if (els.preplyRateDisplay && !state.profileSettings?.rateText) {
+        els.preplyRateDisplay.textContent = rateText;
+    }
+    if (els.studentPaypalReminder) {
+        const reminder = offers.paypalReminder ||
+            "Just a quick reminder: when you choose to pay through PayPal, please choose Goods and Services. Choosing another option may affect my PayPal account.";
+        const paypalLink = normalizePayPalLink(offers.paypalPaymentLink)
+            || "https://paypal.me/mahmoudtafesh2007";
+        els.studentPaypalReminder.textContent = reminder;
+        if (els.studentPaypalLink) {
+            els.studentPaypalLink.href = paypalLink;
+            els.studentPaypalLink.hidden = !paypalLink;
+        }
+    }
+
+    const pkgs = Array.isArray(offers.packages) && offers.packages.length
+        ? offers.packages
+        : getRecommendedPackagesForPrice(lessonPrice);
+    if (pkgs.length > 0) {
+        const stillExists = pkgs.find(p => p.lessons === state.selectedPackage?.lessons && p.price === state.selectedPackage?.price);
+        if (!stillExists) {
+            const defaultPkg = pkgs.find(p => p.popular) || pkgs[0];
+            state.selectedPackage = {
+                lessons: defaultPkg.lessons,
+                price: defaultPkg.price,
+                label: `${defaultPkg.lessons} Lessons ($${defaultPkg.price})`
+            };
+        }
+        const display = document.getElementById("selectedPackageDisplay");
+        if (display && state.selectedPackage) {
+            display.textContent = state.selectedPackage.label;
+        }
+    }
+
+    const packagesGrid = document.getElementById("packagesGrid");
+    if (packagesGrid) {
+        packagesGrid.innerHTML = pkgs.map(p => {
+            const isSelected = state.selectedPackage && state.selectedPackage.lessons === p.lessons && state.selectedPackage.price === p.price;
+            const popularClass = p.popular ? " package-card--popular" : "";
+            const selectedClass = isSelected ? " is-selected" : "";
+            const popularLabelStyle = p.popular ? "background: #059669; color: #fff;" : "background: var(--accent); color: #fff;";
+            return `
+                <div class="package-card${popularClass}${selectedClass}" style="cursor: pointer;" data-package-lessons="${p.lessons}" data-package-price="${p.price}" data-package-label="${escapeHtml(p.lessons + " Lessons ($" + p.price + ")")}">
+                    ${p.badge ? `<span style="font-size: 0.75rem; ${popularLabelStyle} padding: 2px 6px; border-radius: 12px; font-weight: 700;">${escapeHtml(p.badge)}</span>` : ""}
+                    <h4 style="margin: 6px 0 2px;">${p.lessons} Lesson${p.lessons === 1 ? "" : "s"}</h4>
+                    <strong style="${p.popular ? "color: #047857;" : "color: var(--ink);"} font-size: 1.1rem;">$${p.price}</strong>
+                </div>
+            `;
+        }).join("");
+    }
+
+    const sidebarContainer = document.getElementById("sidebarPackagesContainer");
+    if (sidebarContainer) {
+        sidebarContainer.innerHTML = pkgs.map(p => {
+            const badgeText = p.popular ? (p.badge || "Popular") : p.badge;
+            return `
+                <div class="sidebar-package-item">
+                    <span class="sidebar-package-label">
+                        ${p.lessons} Lesson${p.lessons === 1 ? "" : "s"}
+                        ${badgeText ? `<span class="sidebar-package-badge">${escapeHtml(badgeText)}</span>` : ""}
+                    </span>
+                    <strong class="sidebar-package-price">$${p.price}</strong>
+                </div>
+            `;
+        }).join("");
+    }
+}
+
+
+function syncResponsiveWelcomeLayout() {
+    const container = document.querySelector(".preply-container");
+    const main = document.querySelector(".preply-main");
+    const sidebar = document.querySelector(".preply-sidebar");
+    const reviews = document.getElementById("studentReviewsSection");
+    if (!container || !main || !sidebar || !reviews) return;
+
+    const isMobile = window.matchMedia("(max-width: 960px)").matches;
+    if (isMobile) {
+        if (sidebar.parentElement !== main || sidebar.nextElementSibling !== reviews) {
+            main.insertBefore(sidebar, reviews);
+        }
+        return;
+    }
+
+    if (sidebar.parentElement !== container || sidebar.previousElementSibling !== main) {
+        container.insertBefore(sidebar, main.nextSibling);
+    }
+}
+
+function normalizePayPalLink(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    try {
+        const url = new URL(raw);
+        const host = url.hostname.toLowerCase();
+        const isPayPalHost = host === "paypal.com"
+            || host.endsWith(".paypal.com")
+            || host === "paypal.me"
+            || host.endsWith(".paypal.me");
+        return url.protocol === "https:" && isPayPalHost ? url.href : "";
+    } catch {
+        return "";
     }
 }
 
@@ -849,6 +1368,7 @@ async function renderBookingCalendar() {
     const schedule = await getSchedulableSlots(7, bookingDeps(), {
         rangeStartMs: weekStart.getTime(),
         rangeEndMs: weekEnd.getTime(),
+        minimumLeadMinutes: MIN_BOOKING_LEAD_MINUTES,
     });
     const slotsByDate = new Map();
     schedule.forEach((slot) => {
@@ -885,16 +1405,27 @@ async function renderBookingCalendar() {
     if (!els.bookingWeeklyGrid) return;
     els.bookingWeeklyGrid.innerHTML = "";
     let hasAny = false;
+    let anyDayHasMoreThan5 = false;
 
-    days.forEach((day) => {
+    days.forEach((day, dayIndex) => {
         const column = document.createElement("div");
         column.className = `booking-day-column${day.slots.length ? "" : " is-empty"}${day.dateKey === state.visibleDateKey ? " is-focused" : ""}`;
         column.dataset.dateKey = day.dateKey;
+        column.style.setProperty("--col-index", String(dayIndex));
+
+        const weekdayShort = formatDateKey(day.dateKey, { weekday: "short" });
+        const dayNumber = formatDateKey(day.dateKey, { day: "numeric" });
+
         const header = document.createElement("div");
         header.className = "booking-day-header";
+
+        // Accent bar color: first day gets gray (#9ca3af), other days get pink (#f43f5e)
+        const accentColor = dayIndex === 0 ? "#9ca3af" : "#f43f5e";
+
         header.innerHTML = `
-            <div class="booking-day-label">${escapeHtml(formatDateKey(day.dateKey, { weekday: "long" }))}</div>
-            <div class="booking-day-date">${escapeHtml(formatDateKey(day.dateKey, { month: "short", day: "numeric" }))}</div>
+            <div class="booking-day-accent-bar" style="background-color: ${accentColor};"></div>
+            <div class="booking-day-label">${escapeHtml(weekdayShort)}</div>
+            <div class="booking-day-date">${escapeHtml(dayNumber)}</div>
         `;
         column.appendChild(header);
 
@@ -908,14 +1439,21 @@ async function renderBookingCalendar() {
             body.appendChild(empty);
         } else {
             hasAny = true;
-            day.slots.forEach((slot) => {
+            const sortedSlots = [...day.slots].sort((a, b) => a.startMs - b.startMs);
+            if (sortedSlots.length > 5) {
+                anyDayHasMoreThan5 = true;
+            }
+            const visibleSlots = (!state.showAllSlots) ? sortedSlots.slice(0, 5) : sortedSlots;
+
+            visibleSlots.forEach((slot) => {
                 const btn = document.createElement("button");
                 btn.type = "button";
                 btn.className = `slot-btn${state.selectedSlotMs === slot.startMs ? " is-selected" : ""}`;
                 btn.dataset.slotStart = String(slot.startMs);
                 btn.textContent = new Date(slot.startMs).toLocaleTimeString([], {
-                    hour: "numeric",
+                    hour: "2-digit",
                     minute: "2-digit",
+                    hour12: false,
                     timeZone: timezone,
                 });
                 btn.addEventListener("click", () => {
@@ -931,8 +1469,48 @@ async function renderBookingCalendar() {
         els.bookingWeeklyGrid.appendChild(column);
     });
 
+    // Generate mobile day selector tabs dynamically
+    const mobileTabsContainer = document.getElementById("bookingMobileDayTabs");
+    if (mobileTabsContainer) {
+        mobileTabsContainer.innerHTML = "";
+        days.forEach((day) => {
+            const tabBtn = document.createElement("button");
+            tabBtn.type = "button";
+            tabBtn.className = `mobile-day-tab${day.dateKey === state.visibleDateKey ? " is-active" : ""}${day.slots.length ? "" : " is-empty"}`;
+
+            const weekdayShort = formatDateKey(day.dateKey, { weekday: "short" });
+            const dayNumber = formatDateKey(day.dateKey, { day: "numeric" });
+
+            // Show first 2 characters of weekday name (e.g., Mo, Tu, We)
+            const narrowDayName = weekdayShort ? weekdayShort.substring(0, 2) : "";
+
+            tabBtn.innerHTML = `
+                <span class="mobile-day-tab-name">${escapeHtml(narrowDayName)}</span>
+                <span class="mobile-day-tab-num">${escapeHtml(dayNumber)}</span>
+                ${day.slots.length ? '<span class="mobile-day-tab-dot"></span>' : ''}
+            `;
+
+            tabBtn.addEventListener("click", () => {
+                state.visibleDateKey = day.dateKey;
+                renderBookingCalendar().catch(console.error);
+            });
+            mobileTabsContainer.appendChild(tabBtn);
+        });
+    }
+
     if (els.bookingEmptyState) {
         els.bookingEmptyState.hidden = hasAny;
+    }
+
+    if (els.viewFullScheduleRow) {
+        if (anyDayHasMoreThan5) {
+            els.viewFullScheduleRow.style.display = "flex";
+            if (els.viewFullScheduleBtn) {
+                els.viewFullScheduleBtn.textContent = state.showAllSlots ? "View simple schedule" : "View full schedule";
+            }
+        } else {
+            els.viewFullScheduleRow.style.display = "none";
+        }
     }
 
     if (state.selectedSlotMs) {
@@ -955,15 +1533,225 @@ async function loadBookingStatus(email) {
         await loadStudentBookings();
         return;
     }
-    await loadBookingStatusByEmail({
-        db: window.db,
-        email,
-        bookingStatusList: els.bookingStatusList,
-        bookingStatusMsg: els.bookingStatusMsg,
-        hashEmail,
-        escapeHtml,
-        formatSlotTime,
+    if (els.bookingStatusList) {
+        els.bookingStatusList.innerHTML = "<div class=\"small-note\">Sign in to view your private bookings.</div>";
+    }
+    setStatus(els.bookingStatusMsg, email ? "Sign in with this email to view your bookings." : "");
+}
+
+let upcomingBannerInterval = null;
+
+function getUpcomingRelativeTime(slotStart) {
+    const diff = slotStart - Date.now();
+    if (diff <= 0) return "Live now!";
+    const mins = Math.ceil(diff / 60000);
+    if (mins < 60) {
+        return `In ${mins} minute${mins === 1 ? "" : "s"}`;
+    }
+    const hours = Math.floor(mins / 60);
+    const remainingMins = mins % 60;
+    if (hours < 24) {
+        if (remainingMins === 0) {
+            return `In ${hours} hour${hours === 1 ? "" : "s"}`;
+        }
+        return `In ${hours} hour${hours === 1 ? "" : "s"}, ${remainingMins} minute${remainingMins === 1 ? "" : "s"}`;
+    }
+    const days = Math.floor(hours / 24);
+    const remainingHours = hours % 24;
+    if (remainingHours === 0) {
+        return `In ${days} day${days === 1 ? "" : "s"}`;
+    }
+    return `In ${days} day${days === 1 ? "" : "s"}, ${remainingHours} hour${remainingHours === 1 ? "" : "s"}`;
+}
+
+function getLessonEntryLabel(accessState) {
+    if (accessState.canEnter) return "Enter classroom";
+    if (accessState.reason === "ended") return "Lesson ended";
+    const minutes = Math.max(1, Math.ceil(accessState.msUntilOpen / 60000));
+    if (minutes < 60) return `Opens in ${minutes} min`;
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    return remainingMinutes ? `Opens in ${hours}h ${remainingMinutes}m` : `Opens in ${hours}h`;
+}
+
+function renderUpcomingLessonBanner(bookings) {
+    const bannerEl = document.getElementById("upcomingLessonBanner");
+    if (!bannerEl) return;
+
+    if (upcomingBannerInterval) {
+        clearInterval(upcomingBannerInterval);
+        upcomingBannerInterval = null;
+    }
+
+    if (!bookings || !bookings.length) {
+        bannerEl.style.display = "none";
+        bannerEl.innerHTML = "";
+        return;
+    }
+
+    const now = Date.now();
+    const activeAndFuture = bookings.filter((b) => {
+        const status = (b.status || "").toLowerCase();
+        if (status === "canceled" || status === "completed") return false;
+
+        const slotStart = Number(b.slot || 0);
+        const slotEnd = slotStart + 50 * 60 * 1000; // 50 mins duration
+        const accessState = getLessonAccessState(slotStart, now);
+
+        // Show if active now or starting in less than 15 hours
+        if (now >= slotStart && accessState.canEnter) return true;
+        if (slotStart > now && (slotStart - now) <= 15 * 60 * 60 * 1000) return true;
+
+        return false;
     });
+
+    if (!activeAndFuture.length) {
+        bannerEl.style.display = "none";
+        bannerEl.innerHTML = "";
+        return;
+    }
+
+    // Sort ascending to get the closest one
+    activeAndFuture.sort((a, b) => Number(a.slot) - Number(b.slot));
+    const nextBooking = activeAndFuture[0];
+    const slotStart = Number(nextBooking.slot);
+    const slotEnd = slotStart + 50 * 60 * 1000;
+
+    bannerEl.style.display = "block";
+
+    const updateBannerContent = () => {
+        const currentNow = Date.now();
+        const isLive = currentNow >= slotStart && currentNow < slotEnd;
+        const accessState = getLessonAccessState(slotStart, currentNow);
+        let titleHtml = "";
+        let countdownText = "";
+        let buttonLabel = getLessonEntryLabel(accessState);
+        let pulseClass = "";
+
+        const timezone = getDisplayTimezone();
+        const dateStr = new Date(slotStart).toLocaleDateString("en-US", {
+            weekday: "long",
+            month: "short",
+            day: "numeric",
+            timeZone: timezone
+        });
+        const startTimeStr = new Date(slotStart).toLocaleTimeString("en-US", {
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+            timeZone: timezone
+        });
+        const endTimeStr = new Date(slotEnd).toLocaleTimeString("en-US", {
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+            timeZone: timezone
+        });
+        const fullTimeStr = `${startTimeStr} – ${endTimeStr}`;
+
+        if (isLive) {
+            const minsActive = Math.floor((currentNow - slotStart) / 60000);
+            titleHtml = `<span style="color: #ef4444; font-weight: 800; display: inline-flex; align-items: center; gap: 6px;">🔴 Arabic Lesson is LIVE NOW!</span>`;
+            countdownText = `Active lesson started ${minsActive} min${minsActive === 1 ? "" : "s"} ago.`;
+            pulseClass = "pulse-active";
+        } else {
+            titleHtml = `Arabic Lesson`;
+            countdownText = getUpcomingRelativeTime(slotStart);
+            const timeToStart = slotStart - currentNow;
+            if (timeToStart <= 15 * 60 * 1000) {
+                pulseClass = "pulse-active";
+            }
+        }
+
+        const studentDisplayName = state.currentUser?.displayName || state.currentUser?.name || nextBooking?.studentName || "Student";
+        const studentInitial = (studentDisplayName.trim()[0] || "S").toUpperCase();
+        const motivationalQuotes = [
+            "Ready for your next Arabic lesson? Every step brings you closer to fluency! 🌟",
+            "Get ready! Consistency is the secret to mastering a new language 🚀",
+            "Welcome! Let's build your Arabic skills step by step today ✨",
+            "Ready to learn? Great progress happens one lesson at a time 🎓"
+        ];
+        const quoteIndex = (nextBooking?.slot || 0) % motivationalQuotes.length;
+        const motivationalPhrase = motivationalQuotes[quoteIndex];
+
+        bannerEl.innerHTML = `
+            <div class="upcoming-banner-card">
+                <div class="upcoming-banner-main" style="display: flex; flex-direction: column; gap: 8px;">
+                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 4px;">
+                        <div style="width: 46px; height: 46px; background: var(--primary); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.3rem; border-radius: var(--radius-sm); flex-shrink: 0; box-shadow: 0 4px 12px rgba(15,118,110,0.22);">
+                            ${escapeHtml(studentInitial)}
+                        </div>
+                        <div>
+                            <div style="font-weight: 800; font-size: 1.2rem; color: var(--ink); line-height: 1.2;">Welcome, ${escapeHtml(studentDisplayName)} 👋</div>
+                            <div style="font-size: 0.82rem; color: var(--primary-dark); font-weight: 600; margin-top: 2px;">${escapeHtml(motivationalPhrase)}</div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="upcoming-banner-time" style="font-size: 1.12rem; font-weight: 800; color: var(--ink);">${escapeHtml(fullTimeStr)}</div>
+                        <div style="font-size: 0.82rem; color: var(--primary); font-weight: 700; margin-top: -2px; text-transform: uppercase; letter-spacing: 0.4px;">${escapeHtml(dateStr)}</div>
+                        <div style="font-size: 0.76rem; color: var(--muted); font-weight: 700; margin-top: 2px;">Timezone: ${escapeHtml(timezone)} (${escapeHtml(formatTimezoneGmt(timezone))})</div>
+                        <div class="upcoming-banner-countdown" style="margin: 6px 0 12px 0; font-size: 0.92rem; font-weight: 700; color: var(--muted); display: flex; align-items: center; gap: 6px;">
+                            <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--primary);"></span>
+                            ${countdownText}
+                        </div>
+                    </div>
+                    <div>
+                        <button class="btn upcoming-banner-btn ${pulseClass}" id="bannerJoinBtn" ${accessState.canEnter ? "" : "disabled"} aria-disabled="${accessState.canEnter ? "false" : "true"}">
+                            🎓 ${buttonLabel}
+                        </button>
+                    </div>
+                </div>
+                <!-- Custom Stacked retro clock Illustration SVG themed to site colors -->
+                <svg width="125" height="125" viewBox="0 0 130 130" fill="none" xmlns="http://www.w3.org/2000/svg" style="align-self: flex-end; margin-left: auto; flex-shrink: 0;">
+                    <!-- Base Amber Radio/Clock -->
+                    <rect x="25" y="80" width="85" height="40" rx="8" fill="#F59E0B" stroke="var(--ink)" stroke-width="2.5" />
+                    <rect x="35" y="105" width="30" height="8" rx="2" fill="#D97706" />
+                    <circle cx="80" cy="100" r="6" fill="#0F766E" stroke="var(--ink)" stroke-width="2" />
+                    <circle cx="95" cy="100" r="6" fill="#0F766E" stroke="var(--ink)" stroke-width="2" />
+
+                    <!-- Middle Terracotta Clock -->
+                    <rect x="35" y="55" width="60" height="30" rx="6" fill="#C2410C" stroke="var(--ink)" stroke-width="2.5" />
+                    <rect x="42" y="60" width="46" height="20" rx="3" fill="#FFFDF9" stroke="var(--ink)" stroke-width="2" />
+                    <!-- Hands of middle clock -->
+                    <path d="M65 70 L75 70" stroke="var(--ink)" stroke-width="2.5" stroke-linecap="round" />
+                    <path d="M65 70 L65 63" stroke="#C2410C" stroke-width="2" stroke-linecap="round" />
+                    <circle cx="65" cy="70" r="2.5" fill="var(--ink)" />
+
+                    <!-- Top Teal Alarm Clock -->
+                    <!-- Legs -->
+                    <line x1="45" y1="52" x2="40" y2="58" stroke="var(--ink)" stroke-width="3" stroke-linecap="round" />
+                    <line x1="85" y1="52" x2="90" y2="58" stroke="var(--ink)" stroke-width="3" stroke-linecap="round" />
+                    <!-- Bells -->
+                    <circle cx="45" cy="18" r="7" fill="#5F6875" stroke="var(--ink)" stroke-width="2" />
+                    <path d="M42 22 L48 28" stroke="var(--ink)" stroke-width="3" />
+                    <circle cx="85" cy="18" r="7" fill="#5F6875" stroke="var(--ink)" stroke-width="2" />
+                    <path d="M88 22 L82 28" stroke="var(--ink)" stroke-width="3" />
+                    <!-- Bell handle -->
+                    <path d="M55 12 H75" stroke="var(--ink)" stroke-width="3" stroke-linecap="round" />
+                    <!-- Body -->
+                    <circle cx="65" cy="35" r="20" fill="#0F766E" stroke="var(--ink)" stroke-width="2.5" />
+                    <circle cx="65" cy="35" r="15" fill="#FFFDF9" stroke="var(--ink)" stroke-width="2" />
+                    <!-- Hands -->
+                    <path d="M65 35 L73 38" stroke="var(--ink)" stroke-width="2" stroke-linecap="round" />
+                    <path d="M65 35 L60 28" stroke="var(--ink)" stroke-width="2" stroke-linecap="round" />
+                    <circle cx="65" cy="35" r="2" fill="var(--ink)" />
+                </svg>
+            </div>
+        `;
+
+        // Wire button action
+        const btn = bannerEl.querySelector("#bannerJoinBtn");
+        if (accessState.canEnter) {
+            btn?.addEventListener("click", () => {
+                openClassroomDirectly(nextBooking);
+            });
+        }
+    };
+
+    updateBannerContent();
+
+    // Update every 30 seconds to keep countdown accurate
+    upcomingBannerInterval = setInterval(updateBannerContent, 30000);
 }
 
 async function loadStudentBookings() {
@@ -974,60 +1762,483 @@ async function loadStudentBookings() {
         return;
     }
     try {
-        let snap;
+        const email = state.currentUser.email || "";
+        let snapUid = null;
+        let snapEmail = null;
+
+        // 1. Query bookings by studentUid
         try {
-            snap = await window.db
+            snapUid = await window.db
                 .collection("bookings")
                 .where("studentUid", "==", state.currentUser.uid)
-                .orderBy("slot", "desc")
-                .limit(10)
+                .limit(100)
                 .get();
-        } catch (queryError) {
-            const code = queryError?.code || "";
-            const message = String(queryError?.message || "");
-            const needsIndex = code === "failed-precondition" || message.toLowerCase().includes("index");
-            if (!needsIndex) {
-                throw queryError;
+        } catch (e) {
+            console.warn("Failed querying bookings by studentUid:", e);
+        }
+
+        // 2. Query bookings by email
+        if (email && (!snapUid || snapUid.empty)) {
+            try {
+                snapEmail = await window.db
+                    .collection("bookings")
+                    .where("email", "==", email)
+                    .limit(100)
+                    .get();
+            } catch (e) {
+                console.warn("Failed querying bookings by email:", e);
             }
-            snap = await window.db
-                .collection("bookings")
-                .where("studentUid", "==", state.currentUser.uid)
-                .limit(50)
-                .get();
         }
-        const rows = [];
-        snap.forEach((doc) => rows.push({ id: doc.id, ...(doc.data() || {}) }));
+
+        const rowsMap = new Map();
+
+        if (snapUid) {
+            snapUid.forEach((doc) => {
+                const data = doc.data() || {};
+                const existing = rowsMap.get(doc.id) || {};
+                rowsMap.set(doc.id, { ...existing, id: doc.id, ...data });
+            });
+        }
+        if (snapEmail) {
+            snapEmail.forEach((doc) => {
+                const data = doc.data() || {};
+                const existing = rowsMap.get(doc.id) || {};
+                rowsMap.set(doc.id, { ...existing, id: doc.id, ...data });
+            });
+        }
+
+        const rows = Array.from(rowsMap.values());
         rows.sort((a, b) => (b.slot || 0) - (a.slot || 0));
-        if (!rows.length) {
-            els.bookingStatusList.innerHTML = "<div class=\"small-note\">No bookings yet.</div>";
-            return;
-        }
-        els.bookingStatusList.innerHTML = rows.slice(0, 10).map((b) => {
+        await syncLessonFeedbackPrompt(rows);
+
+        const now = Date.now();
+        let upcomingBookings = rows.filter((b) => {
             const status = (b.status || "booked").toLowerCase();
-            const label = status === "canceled" ? "Canceled" : status === "rescheduled" ? "Rescheduled" : "Booked";
-            const canCancel = status !== "canceled";
-            const canReschedule = status !== "canceled" && Number(b.slot || 0) - Date.now() >= STUDENT_CHANGE_CUTOFF_MS;
-            const isLateWindow = status !== "canceled" && Number(b.slot || 0) - Date.now() < STUDENT_CHANGE_CUTOFF_MS;
-            const cutoffNote = isLateWindow
-                ? "<div class=\"small-note\">Rescheduling closes 12 hours before the lesson. Late cancellation may still charge the lesson price.</div>"
-                : "";
-            return `
-                <div class="booking-status-item" data-student-booking-id="${escapeHtml(b.id)}">
-                    <div><strong>${escapeHtml(formatSlotTime(b.slot))}</strong></div>
-                    <div>Status: ${escapeHtml(label)}</div>
-                    ${cutoffNote}
-                    <div class="booking-item__actions">
-                        <button class="btn btn--ghost btn--small" data-student-action="cancel" ${canCancel ? "" : "disabled"}>Cancel</button>
-                        <button class="btn btn--outline btn--small" data-student-action="reschedule" ${canReschedule ? "" : "disabled"}>Reschedule</button>
+            if (status === "canceled" || status === "completed") return false;
+            return Number(b.slot || 0) + 50 * 60 * 1000 >= now;
+        });
+
+        // Update the upcoming lesson countdown banner
+        renderUpcomingLessonBanner(rows);
+
+        const takenBookings = rows.filter((b) => {
+            const status = (b.status || "booked").toLowerCase();
+            if (status === "canceled") return false;
+            return status === "completed" || Number(b.slot || 0) + 50 * 60 * 1000 < now;
+        });
+
+        const canceledBookings = rows.filter((b) => {
+            return (b.status || "booked").toLowerCase() === "canceled";
+        });
+
+        // Generate Upcoming HTML
+        let upcomingHtml = "";
+        if (!upcomingBookings.length) {
+            upcomingHtml = `<div class="small-note" style="padding: 10px 0; text-align: center;">No upcoming lessons booked.</div>`;
+        } else {
+            upcomingHtml = upcomingBookings.map((b) => {
+                const status = (b.status || "booked").toLowerCase();
+                const label = status === "rescheduled" ? "Rescheduled" : "Booked";
+                const canReschedule = Number(b.slot || 0) - Date.now() >= STUDENT_CHANGE_CUTOFF_MS;
+                const isLateWindow = Number(b.slot || 0) - Date.now() < STUDENT_CHANGE_CUTOFF_MS;
+
+                const deadlineMs = Number(b.slot || 0) - STUDENT_CHANGE_CUTOFF_MS;
+                const formattedDeadline = formatSlotTime(deadlineMs);
+                const msLeft = deadlineMs - Date.now();
+                let deadlineText = "";
+                let deadlineStyle = "";
+
+                if (msLeft > 0) {
+                    const hrsLeft = Math.floor(msLeft / 3600000);
+                    const minsLeft = Math.floor((msLeft % 3600000) / 60000);
+                    let timeLeftStr = "";
+                    if (hrsLeft >= 24) {
+                        const daysLeft = Math.floor(hrsLeft / 24);
+                        const remainingHrs = hrsLeft % 24;
+                        timeLeftStr = `${daysLeft}d ${remainingHrs}h left`;
+                    } else {
+                        timeLeftStr = `${hrsLeft}h ${minsLeft}m left`;
+                    }
+                    deadlineText = `Reschedule Deadline: <strong>${escapeHtml(formattedDeadline)}</strong> (${timeLeftStr} left to change without penalty)`;
+                    deadlineStyle = "background-color: rgba(15, 118, 110, 0.08); border: 1px solid rgba(15, 118, 110, 0.22); color: var(--primary-dark); font-weight: 600;";
+                } else {
+                    deadlineText = `⚠️ Late cancellation window: Reschedule Deadline Passed on <strong>${escapeHtml(formattedDeadline)}</strong>. Free modification is locked.`;
+                    deadlineStyle = "background-color: #fef2f2; border: 1px solid #fee2e2; color: #991b1b; font-weight: 500;";
+                }
+
+                const cutoffNote = `
+                    <div class="reschedule-deadline-warning" style="margin-top: 8px; font-size: 0.78rem; border-radius: var(--radius-sm); padding: 8px 12px; display: flex; align-items: center; gap: 6px; ${deadlineStyle}">
+                        <span style="line-height: 1.4;">${deadlineText}</span>
                     </div>
-                    <div class="booking-item__resched"></div>
+                `;
+                const teacherNotice = b.studentNotice
+                    ? `<div class="student-booking-notice"><strong>Schedule updated by teacher</strong><span>${escapeHtml(b.studentNotice)}</span></div>`
+                    : "";
+
+                return `
+                    <div class="booking-status-item-card" data-student-booking-id="${escapeHtml(b.id)}">
+                        <div>
+                            <strong style="font-size: 0.95rem; color: var(--ink);">${escapeHtml(formatSlotTime(b.slot))}</strong>
+                            <div style="font-size: 0.8rem; margin-top: 4px; display: flex; align-items: center; gap: 6px;">
+                                <span style="background: rgba(15, 118, 110, 0.12); color: var(--primary-dark); padding: 3px 8px; border-radius: 6px; font-weight: 700; font-size: 0.72rem; border: 1px solid rgba(15, 118, 110, 0.2);">${escapeHtml(label)}</span>
+                            </div>
+                        </div>
+                        ${teacherNotice}
+                        ${cutoffNote}
+                        <div class="booking-item__actions" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;">
+                            <button class="btn btn--primary btn--small" data-student-action="classroom" data-student-booking-id="${escapeHtml(b.id)}">🎓 Enter Classroom</button>
+                            <button class="btn btn--ghost btn--small" data-student-action="cancel">Cancel</button>
+                            <button class="btn btn--outline btn--small" data-student-action="reschedule" ${canReschedule ? "" : "disabled"}>Reschedule</button>
+                        </div>
+                        <div class="booking-item__resched"></div>
+                    </div>
+                `;
+            }).join("");
+        }
+
+        // Generate Taken HTML
+        let takenHtml = "";
+        if (!takenBookings.length) {
+            takenHtml = `<div class="small-note" style="padding: 10px 0; text-align: center;">No completed lessons recorded yet.</div>`;
+        } else {
+            takenHtml = takenBookings.map((b) => {
+                const isCompleted = b.status === "completed";
+                const label = isCompleted ? "Completed & Attended" : "Taken";
+                return `
+                    <div class="booking-status-item-card" style="opacity: 0.85;">
+                        <div>
+                            <strong style="font-size: 0.9rem; color: var(--ink);">${escapeHtml(formatSlotTime(b.slot))}</strong>
+                            <div style="font-size: 0.8rem; margin-top: 2px; display: flex; align-items: center; gap: 6px;">
+                                <span style="background: #dcfce7; color: #15803d; padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 0.72rem;">${label}</span>
+                                <span style="color: var(--muted); font-size: 0.75rem;">Lesson completed successfully</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join("");
+        }
+
+        // Generate Canceled HTML
+        let canceledHtml = "";
+        if (canceledBookings.length) {
+            canceledHtml = canceledBookings.map((b) => {
+                return `
+                    <div class="booking-status-item-card" style="opacity: 0.65; background: #fafafa;">
+                        <div>
+                            <strong style="font-size: 0.9rem; color: var(--muted); text-decoration: line-through;">${escapeHtml(formatSlotTime(b.slot))}</strong>
+                            <div style="font-size: 0.8rem; margin-top: 2px;">
+                                <span style="background: #f1f5f9; color: #475569; padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 0.72rem;">Canceled</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join("");
+        }
+
+        // Output collapsible HTML structure
+        els.bookingStatusList.innerHTML = `
+            <div class="booking-status-section">
+                <div class="booking-section-header" id="upcomingSectionHeader">
+                    <h4 class="booking-section-title">
+                        <span>📅 Upcoming Lessons</span>
+                        <span class="section-badge-count accent">${upcomingBookings.length}</span>
+                    </h4>
+                    <button class="btn-toggle-section" id="toggleUpcomingBtn">Hide ▲</button>
                 </div>
-            `;
-        }).join("");
+                <div class="booking-section-content" id="upcomingSectionContent">
+                    ${upcomingHtml}
+                </div>
+            </div>
+
+            <div class="booking-status-section" style="margin-top: 16px;">
+                <div class="booking-section-header" id="completedSectionHeader">
+                    <h4 class="booking-section-title">
+                        <span>🎓 Lessons You've Taken</span>
+                        <span class="section-badge-count">${takenBookings.length}</span>
+                    </h4>
+                    <button class="btn-toggle-section" id="toggleCompletedBtn">Show ▼</button>
+                </div>
+                <div class="booking-section-content" id="completedSectionContent" style="display: none;">
+                    ${takenHtml}
+                    ${canceledBookings.length ? `
+                        <div style="margin: 16px 0 8px 0; border-top: 1px dashed var(--line); padding-top: 12px; font-weight: 700; font-size: 0.85rem; color: var(--muted);">
+                            ❌ Canceled Bookings History
+                        </div>
+                        ${canceledHtml}
+                    ` : ""}
+                </div>
+            </div>
+        `;
+
+        const upContent = document.getElementById("upcomingSectionContent");
+        const upToggleBtn = document.getElementById("toggleUpcomingBtn");
+        const compContent = document.getElementById("completedSectionContent");
+        const compToggleBtn = document.getElementById("toggleCompletedBtn");
+
+        const toggleUpcoming = () => {
+            if (upContent.style.display === "none") {
+                upContent.style.display = "block";
+                upToggleBtn.textContent = "Hide ▲";
+            } else {
+                upContent.style.display = "none";
+                upToggleBtn.textContent = "Show ▼";
+            }
+        };
+
+        const toggleCompleted = () => {
+            if (compContent.style.display === "none") {
+                compContent.style.display = "block";
+                compToggleBtn.textContent = "Hide ▲";
+            } else {
+                compContent.style.display = "none";
+                compToggleBtn.textContent = "Show ▼";
+            }
+        };
+
+        document.getElementById("upcomingSectionHeader")?.addEventListener("click", (e) => {
+            if (!e.target.closest("button") && !e.target.closest(".booking-item__actions")) {
+                toggleUpcoming();
+            }
+        });
+        upToggleBtn?.addEventListener("click", (e) => {
+            e.stopPropagation();
+            toggleUpcoming();
+        });
+
+        document.getElementById("completedSectionHeader")?.addEventListener("click", (e) => {
+            if (!e.target.closest("button") && !e.target.closest(".booking-item__actions")) {
+                toggleCompleted();
+            }
+        });
+        compToggleBtn?.addEventListener("click", (e) => {
+            e.stopPropagation();
+            toggleCompleted();
+        });
+
     } catch (error) {
         console.error("Could not load student bookings.", error);
         els.bookingStatusList.innerHTML = "<div class=\"small-note\">Unable to load your bookings right now.</div>";
     }
+}
+
+const LESSON_FEEDBACK_METRICS = [
+    ["reassurance", "Reassurance", "&#9786;"],
+    ["clarity", "Clarity"],
+    ["progress", "Progress", "&#8635;"],
+    ["preparation", "Preparation", "&#9998;"],
+];
+
+function getLessonEndMs(booking) {
+    return Number(booking?.slot || 0) + Number(booking?.durationMinutes || 50) * 60 * 1000;
+}
+
+function renderLessonFeedbackStars() {
+    document.querySelectorAll("[data-lesson-feedback-metric]").forEach((metricEl) => {
+        const metric = metricEl.dataset.lessonFeedbackMetric;
+        const starsEl = metricEl.querySelector(".lesson-feedback-stars");
+        if (!metric || !starsEl) return;
+        const selected = Number(state.lessonFeedbackRatings[metric] || 0);
+        starsEl.innerHTML = Array.from({ length: 5 }, (_, index) => {
+            const value = index + 1;
+            const isSelected = value <= selected;
+            return `<button type="button" class="lesson-feedback-star${isSelected ? " is-selected" : ""}" data-feedback-rating="${value}" data-feedback-metric="${escapeHtml(metric)}" aria-label="${value} out of 5" aria-pressed="${value === selected ? "true" : "false"}">${isSelected ? "&#9733;" : "&#9734;"}</button>`;
+        }).join("");
+    });
+}
+
+function hideLessonFeedbackCard() {
+    if (!els.lessonFeedbackCard) return;
+    els.lessonFeedbackCard.hidden = true;
+    if (els.lessonFeedbackReminder && state.pendingLessonFeedbackBooking) {
+        els.lessonFeedbackReminder.hidden = false;
+    }
+}
+
+function openLessonFeedbackCard() {
+    if (!els.lessonFeedbackCard || !state.pendingLessonFeedbackBooking) return;
+    els.lessonFeedbackCard.hidden = false;
+    if (els.lessonFeedbackReminder) els.lessonFeedbackReminder.hidden = true;
+    window.setTimeout(() => {
+        els.lessonFeedbackClose?.focus();
+    }, 0);
+}
+
+async function syncLessonFeedbackPrompt(bookings) {
+    if (!els.lessonFeedbackCard || !state.currentUser || state.currentRole !== "student" || !window.db) {
+        hideLessonFeedbackCard();
+        return;
+    }
+    const eligible = bookings
+        .filter((booking) => {
+            const status = String(booking.status || "booked").toLowerCase();
+            return status !== "canceled" && getLessonEndMs(booking) <= Date.now();
+        })
+        .sort((a, b) => Number(b.slot || 0) - Number(a.slot || 0));
+
+    for (const booking of eligible.slice(0, 12)) {
+        const feedbackSnap = await window.db.collection("lessonFeedback").doc(booking.id).get();
+        if (feedbackSnap.exists) continue;
+        state.pendingLessonFeedbackBooking = booking;
+        if (els.lessonFeedbackBookingId.value !== booking.id) {
+            LESSON_FEEDBACK_METRICS.forEach(([key]) => {
+                state.lessonFeedbackRatings[key] = 0;
+            });
+        }
+        els.lessonFeedbackBookingId.value = booking.id;
+        els.lessonFeedbackLessonLabel.textContent = `Rate your lesson from ${formatSlotTime(booking.slot)}. This does not publish a teacher review.`;
+        renderLessonFeedbackStars();
+        if (booking.id === state.lessonFeedbackDismissedBookingId) {
+            els.lessonFeedbackCard.hidden = true;
+            if (els.lessonFeedbackReminder) els.lessonFeedbackReminder.hidden = false;
+        } else {
+            openLessonFeedbackCard();
+        }
+        return;
+    }
+    state.pendingLessonFeedbackBooking = null;
+    if (els.lessonFeedbackReminder) els.lessonFeedbackReminder.hidden = true;
+    hideLessonFeedbackCard();
+}
+
+function buildLessonFeedbackSummary(feedbackRows) {
+    const students = new Map();
+    feedbackRows.forEach((row) => {
+        const studentKey = String(row.studentUid || "").trim();
+        if (!studentKey) return;
+        if (!students.has(studentKey)) students.set(studentKey, []);
+        students.get(studentKey).push(row);
+    });
+    const studentAverages = Array.from(students.values()).map((studentRows) => {
+        const averages = {};
+        LESSON_FEEDBACK_METRICS.forEach(([key]) => {
+            averages[key] = studentRows.reduce(
+                (sum, row) => sum + Number(row.ratings?.[key] || 0),
+                0
+            ) / studentRows.length;
+        });
+        return averages;
+    });
+    const realStudentCount = studentAverages.length;
+    const studentCount = LESSON_FEEDBACK_BASELINE.studentCount + realStudentCount;
+    const averages = {};
+    LESSON_FEEDBACK_METRICS.forEach(([key]) => {
+        const baselineTotal = Number(LESSON_FEEDBACK_BASELINE.averages[key] || 0)
+            * LESSON_FEEDBACK_BASELINE.studentCount;
+        const realStudentsTotal = studentAverages.reduce(
+            (sum, studentAverage) => sum + Number(studentAverage[key] || 0),
+            0
+        );
+        averages[key] = (baselineTotal + realStudentsTotal) / studentCount;
+    });
+    return {
+        count: studentCount,
+        studentCount,
+        realStudentCount,
+        lessonCount: feedbackRows.length,
+        averages,
+    };
+}
+
+function renderLessonFeedbackMetricCards(container, summary) {
+    if (!container) return;
+    const metricIcons = {
+        reassurance: "&#9786;",
+        clarity: "&#128172;",
+        progress: "&#8635;",
+        preparation: "&#9998;",
+    };
+    container.innerHTML = LESSON_FEEDBACK_METRICS.map(([key, label]) => `
+        <div class="lesson-rating-metric">
+            <div>
+                <strong>${summary.count ? Number(summary.averages[key] || 0).toFixed(1) : "--"}</strong>
+                <span>${escapeHtml(label)}</span>
+            </div>
+            <i aria-hidden="true">${metricIcons[key] || "&#9733;"}</i>
+        </div>
+    `).join("");
+}
+
+async function loadPublicLessonFeedbackSummary() {
+    if (!window.db || !els.lessonRatingSummary) return;
+    if (typeof state.lessonFeedbackSummaryUnsubscribe === "function") {
+        state.lessonFeedbackSummaryUnsubscribe();
+        state.lessonFeedbackSummaryUnsubscribe = null;
+    }
+    const renderSummary = (rawSummary = {}) => {
+        const studentCount = LESSON_FEEDBACK_BASELINE.studentCount;
+        const averages = LESSON_FEEDBACK_BASELINE.averages;
+        els.lessonRatingSummary.hidden = false;
+        renderLessonFeedbackMetricCards(els.lessonRatingSummaryGrid, {
+            count: studentCount,
+            averages,
+        });
+        els.lessonRatingSummaryCount.textContent = `Based on ${studentCount} anonymous student review${studentCount === 1 ? "" : "s"}`;
+    };
+    renderSummary();
+}
+
+async function refreshTeacherLessonFeedback() {
+    if (!window.db || !state.teacherUser || state.teacherRole !== "teacher") return;
+    const baselineSummary = buildLessonFeedbackSummary([]);
+    if (els.teacherLessonFeedbackCount) {
+        els.teacherLessonFeedbackCount.textContent = `${baselineSummary.studentCount} students · 0 new lesson ratings`;
+    }
+    renderLessonFeedbackMetricCards(els.teacherLessonFeedbackMetrics, baselineSummary);
+    if (els.teacherLessonFeedbackComments) {
+        els.teacherLessonFeedbackComments.innerHTML = `<p class="small-note">Loading private lesson comments...</p>`;
+    }
+    const snap = await window.db.collection("lessonFeedback").orderBy("createdAt", "desc").limit(100).get();
+    const rows = snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
+    const summary = buildLessonFeedbackSummary(rows);
+    if (els.teacherLessonFeedbackCount) {
+        els.teacherLessonFeedbackCount.textContent = `${summary.studentCount} students · ${summary.lessonCount} new lesson rating${summary.lessonCount === 1 ? "" : "s"}`;
+    }
+    renderLessonFeedbackMetricCards(els.teacherLessonFeedbackMetrics, summary);
+    if (els.teacherLessonFeedbackComments) {
+        const comments = rows.filter((row) => String(row.comment || "").trim());
+        els.teacherLessonFeedbackComments.innerHTML = comments.length
+            ? comments.slice(0, 20).map((row) => `
+                <article class="lesson-feedback-comment">
+                    <strong>${escapeHtml(formatSlotTime(row.lessonSlot))}</strong>
+                    <p>${escapeHtml(row.comment)}</p>
+                </article>
+            `).join("")
+            : `<p class="small-note">No private lesson comments yet.</p>`;
+    }
+    await window.db.collection("lessonFeedbackSummary").doc("teacher").set({
+        count: summary.count,
+        studentCount: summary.studentCount,
+        lessonCount: summary.lessonCount,
+        baselineStudentCount: LESSON_FEEDBACK_BASELINE.studentCount,
+        averages: summary.averages,
+        updatedAt: Date.now(),
+    }, { merge: true });
+}
+
+function stopTeacherLessonFeedbackListener() {
+    if (typeof state.teacherLessonFeedbackUnsubscribe === "function") {
+        state.teacherLessonFeedbackUnsubscribe();
+    }
+    state.teacherLessonFeedbackUnsubscribe = null;
+    if (state.teacherLessonFeedbackRefreshTimer) {
+        window.clearTimeout(state.teacherLessonFeedbackRefreshTimer);
+        state.teacherLessonFeedbackRefreshTimer = null;
+    }
+}
+
+function startTeacherLessonFeedbackListener() {
+    stopTeacherLessonFeedbackListener();
+}
+
+function stopStudentBookingsListener() {
+    if (typeof state.studentBookingsUnsubscribe === "function") {
+        state.studentBookingsUnsubscribe();
+    }
+    state.studentBookingsUnsubscribe = null;
+}
+
+function startStudentBookingsListener() {
+    stopStudentBookingsListener();
 }
 
 async function cancelStudentBooking(bookingId) {
@@ -1035,6 +2246,37 @@ async function cancelStudentBooking(bookingId) {
     const booking = snap.data() || {};
     if (booking.studentUid !== state.currentUser?.uid) throw new Error("This booking does not belong to your account.");
     const isLateCancel = Number(booking.slot || 0) - Date.now() < STUDENT_CHANGE_CUTOFF_MS;
+    const canceledAt = Date.now();
+    const cancelBatch = window.db.batch();
+    cancelBatch.set(window.db.collection("bookings").doc(bookingId), {
+        status: "canceled",
+        updatedAt: canceledAt,
+        calendarSynced: false,
+        calendarDeletePending: true,
+        canceledAt,
+        canceledBy: "student",
+        history: window.firebase.firestore.FieldValue.arrayUnion({
+            at: canceledAt,
+            action: "canceled",
+            by: "student",
+            lateChargeApplies: isLateCancel,
+        }),
+    }, { merge: true });
+    cancelBatch.set(window.db.collection("publicBookings").doc(bookingId), {
+        status: "canceled",
+        updatedAt: canceledAt,
+        calendarSynced: false,
+    }, { merge: true });
+    if (booking.isFreeTrial === true && booking.studentUid) {
+        cancelBatch.set(window.db.collection("users").doc(booking.studentUid), {
+            trialUsed: false,
+            trialUsedAt: window.firebase.firestore.FieldValue.delete(),
+            updatedAt: window.firebase.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        cancelBatch.delete(window.db.collection("trialClaims").doc(booking.studentUid));
+    }
+    await cancelBatch.commit();
+    let calendarDeletePending = true;
     if ((booking.googleCalendarEventId || bookingId) && typeof window.deleteBookingViaAppsScript === "function") {
         const result = await window.deleteBookingViaAppsScript({
             eventId: booking.googleCalendarEventId,
@@ -1049,28 +2291,17 @@ async function cancelStudentBooking(bookingId) {
             notes: booking.notes || "",
             canceledBy: "Student",
         });
-        if (result?.success === false && !isAlreadyDeletedCalendarEvent(result)) {
-            throw new Error(normalizeAppsScriptStudentError(result, "Could not remove this booking from Google Calendar."));
+        if (result?.success !== false || isAlreadyDeletedCalendarEvent(result)) {
+            calendarDeletePending = false;
         }
     }
-    await window.db.collection("bookings").doc(bookingId).set({
-        status: "canceled",
-        updatedAt: Date.now(),
-        calendarSynced: false,
-        canceledAt: Date.now(),
-        canceledBy: "student",
-        history: window.firebase.firestore.FieldValue.arrayUnion({
-            at: Date.now(),
-            action: "canceled",
-            by: "student",
-            lateChargeApplies: isLateCancel,
-        }),
-    }, { merge: true });
-    await window.db.collection("publicBookings").doc(bookingId).set({
-        status: "canceled",
-        updatedAt: Date.now(),
-        calendarSynced: false,
-    }, { merge: true });
+    if (!calendarDeletePending) {
+        await window.db.collection("bookings").doc(bookingId).set({
+            calendarDeletePending: false,
+            updatedAt: Date.now(),
+        }, { merge: true });
+    }
+    return { calendarDeletePending };
 }
 
 async function openStudentReschedulePanel(itemEl, bookingId) {
@@ -1119,62 +2350,40 @@ async function rescheduleStudentBooking(bookingId, newSlot) {
     }
     const conflict = await findBookingConflict(newSlot, bookingDeps(), { excludeBookingId: bookingId });
     if (conflict) throw new Error("That time is no longer available.");
-    if ((booking.googleCalendarEventId || bookingId) && typeof window.deleteBookingViaAppsScript === "function") {
-        const deleteResult = await window.deleteBookingViaAppsScript({
-            eventId: booking.googleCalendarEventId,
-            bookingId,
-            slot: booking.slot || 0,
-        });
-        if (deleteResult?.success === false && !isAlreadyDeletedCalendarEvent(deleteResult)) {
-            throw new Error(normalizeAppsScriptStudentError(deleteResult, "Could not remove the old Google Calendar event."));
-        }
-    }
-    let calendarSynced = false;
-    let googleCalendarEventId = null;
-    if (typeof window.createBookingViaAppsScript === "function") {
-        const createResult = await window.createBookingViaAppsScript({
-            bookingId,
+    const moveResult = await moveCalendarBooking(bookingId, booking, newSlot);
+    const changedAt = Date.now();
+    try {
+        const batch = window.db.batch();
+        batch.set(window.db.collection("bookings").doc(bookingId), {
             slot: newSlot,
-            durationMinutes: state.bookingSettings.slotMinutes || 50,
-            timeZone: getTeacherTimezone(),
-            teacherEmail: (state.contactSettings?.email || "").trim(),
-            name: booking.name || getStudentName(),
-            email: booking.email || state.currentUser?.email || "",
-            phone: booking.phone || getStudentPhone(),
-            notes: booking.notes || "",
-            studentTimeZone: getLocalTimezone(),
-            studentLocale: navigator.language || "",
-        });
-        if (createResult?.success === false) {
-            throw new Error(createResult.message || "Could not create the new Google Calendar event.");
-        }
-        calendarSynced = !!createResult?.success;
-        googleCalendarEventId = createResult?.eventId || null;
+            status: "rescheduled",
+            updatedAt: changedAt,
+            calendarSynced: true,
+            googleCalendarEventId: moveResult.eventId || booking.googleCalendarEventId || null,
+            meetingUrl: moveResult.meetingUrl || booking.meetingUrl || "",
+            rescheduledFrom: booking.slot,
+            rescheduledAt: changedAt,
+            history: window.firebase.firestore.FieldValue.arrayUnion({
+                at: changedAt,
+                action: "rescheduled",
+                by: "student",
+                from: booking.slot,
+                to: newSlot,
+            }),
+        }, { merge: true });
+        batch.set(window.db.collection("publicBookings").doc(bookingId), {
+            slot: newSlot,
+            status: "rescheduled",
+            updatedAt: changedAt,
+            calendarSynced: true,
+            rescheduledFrom: booking.slot,
+            rescheduledAt: changedAt,
+        }, { merge: true });
+        await batch.commit();
+    } catch (error) {
+        await rollbackCalendarMove(bookingId, booking, newSlot, moveResult);
+        throw error;
     }
-    await window.db.collection("bookings").doc(bookingId).set({
-        slot: newSlot,
-        status: "rescheduled",
-        updatedAt: Date.now(),
-        calendarSynced,
-        googleCalendarEventId,
-        rescheduledFrom: booking.slot,
-        rescheduledAt: Date.now(),
-        history: window.firebase.firestore.FieldValue.arrayUnion({
-            at: Date.now(),
-            action: "rescheduled",
-            by: "student",
-            from: booking.slot,
-            to: newSlot,
-        }),
-    }, { merge: true });
-    await window.db.collection("publicBookings").doc(bookingId).set({
-        slot: newSlot,
-        status: "rescheduled",
-        updatedAt: Date.now(),
-        calendarSynced,
-        rescheduledFrom: booking.slot,
-        rescheduledAt: Date.now(),
-    }, { merge: true });
 }
 
 async function deleteCalendarEventForBooking(bookingId, booking) {
@@ -1188,27 +2397,197 @@ async function deleteCalendarEventForBooking(bookingId, booking) {
     });
 }
 
-async function rescheduleTeacherBooking(bookingId, booking, newSlot) {
-    const conflict = await findBookingConflict(newSlot, bookingDeps(), { excludeBookingId: bookingId });
-    if (conflict) {
-        throw new Error("That slot is already taken.");
+async function moveCalendarBooking(bookingId, booking, newSlot, durationMinutes = 0) {
+    if (typeof window.rescheduleBookingViaAppsScript !== "function") {
+        throw new Error("Calendar rescheduling is not available.");
     }
-    const deleteResult = await deleteCalendarEventForBooking(bookingId, booking);
-    if (deleteResult?.success === false && !isAlreadyDeletedCalendarEvent(deleteResult)) {
-        throw new Error(normalizeAppsScriptStudentError(deleteResult, "Could not remove the old Google Calendar event."));
-    }
-    const createResult = await createCalendarEventForBooking(bookingId, booking, newSlot);
-    if (createResult?.success === false) {
-        throw new Error(createResult.message || "Could not create the new Google Calendar event.");
-    }
-    await rescheduleBooking({
-        db: window.db,
-        firebase: window.firebase,
+    const result = await window.rescheduleBookingViaAppsScript({
         bookingId,
-        booking,
+        eventId: booking.googleCalendarEventId || "",
+        oldSlot: Number(booking.slot || 0),
+        newSlot: Number(newSlot || 0),
+        ...(durationMinutes ? { durationMinutes } : {}),
+    });
+    if (result?.success === false) {
+        throw new Error(normalizeAppsScriptStudentError(result, "Could not reschedule the Google Calendar event."));
+    }
+    return result || { success: true };
+}
+
+async function resizeTeacherBooking(bookingId, booking, durationMinutes) {
+    const oldDuration = Number(booking.durationMinutes || booking.slotMinutes || state.bookingSettings?.slotMinutes || 50);
+    const moveResult = await moveCalendarBooking(bookingId, booking, Number(booking.slot || 0), durationMinutes);
+    try {
+        await resizeBookingDuration({
+            db: window.db,
+            firebase: window.firebase,
+            bookingId,
+            booking,
+            durationMinutes,
+        });
+    } catch (error) {
+        await moveCalendarBooking(
+            bookingId,
+            { ...booking, googleCalendarEventId: moveResult.eventId || booking.googleCalendarEventId },
+            Number(booking.slot || 0),
+            oldDuration
+        ).catch(console.error);
+        throw error;
+    }
+}
+
+async function rollbackCalendarMove(bookingId, booking, movedSlot, moveResult) {
+    if (typeof window.rescheduleBookingViaAppsScript !== "function") return;
+    try {
+        await window.rescheduleBookingViaAppsScript({
+            bookingId,
+            eventId: moveResult?.eventId || booking.googleCalendarEventId || "",
+            oldSlot: Number(movedSlot || 0),
+            newSlot: Number(booking.slot || 0),
+        });
+    } catch (rollbackError) {
+        console.error("Could not roll back Google Calendar reschedule.", rollbackError);
+    }
+}
+
+async function rescheduleTeacherBooking(bookingId, booking, newSlot) {
+    const conflict = await findTeacherLessonConflict(
         newSlot,
-        calendarSynced: !!createResult?.success,
-        googleCalendarEventId: createResult?.eventId || null,
+        Number(booking.durationMinutes || booking.slotMinutes || state.bookingSettings?.slotMinutes || 50),
+        bookingId
+    );
+    if (conflict) throw new Error("Another student lesson already occupies that time.");
+    const moveResult = await moveCalendarBooking(bookingId, booking, newSlot);
+    try {
+        await rescheduleBooking({
+            db: window.db,
+            firebase: window.firebase,
+            bookingId,
+            booking,
+            newSlot,
+            calendarSynced: true,
+            googleCalendarEventId: moveResult.eventId || booking.googleCalendarEventId || null,
+            meetingUrl: moveResult.meetingUrl || booking.meetingUrl || "",
+        });
+    } catch (error) {
+        await rollbackCalendarMove(bookingId, booking, newSlot, moveResult);
+        throw error;
+    }
+    return moveResult;
+}
+
+async function findTeacherLessonConflict(slot, durationMinutes, excludeBookingId = null) {
+    const booked = await getBookedSlotsMap(
+        slot,
+        slot + durationMinutes * 60000,
+        bookingDeps()
+    );
+    const end = slot + durationMinutes * 60000;
+    return Array.from(booked.values()).find((booking) => (
+        booking.id !== excludeBookingId
+        && slot < Number(booking.end || 0)
+        && end > Number(booking.start || 0)
+    )) || null;
+}
+
+function offerTeacherCalendarUndo(bookingId, previousSlot) {
+    document.getElementById("teacherCalendarUndo")?.remove();
+    const undo = document.createElement("div");
+    undo.id = "teacherCalendarUndo";
+    undo.className = "teacher-calendar-undo";
+    undo.innerHTML = `
+        <span>Lesson moved successfully.</span>
+        <button type="button">Undo</button>
+        <i aria-hidden="true"></i>
+    `;
+    document.body.appendChild(undo);
+    const removeUndo = () => undo.remove();
+    const timeoutId = window.setTimeout(removeUndo, 10000);
+    undo.querySelector("button")?.addEventListener("click", async () => {
+        window.clearTimeout(timeoutId);
+        const currentBooking = state.bookingCache instanceof Map ? state.bookingCache.get(bookingId) : null;
+        if (!currentBooking) {
+            removeUndo();
+            return;
+        }
+        try {
+            undo.classList.add("is-working");
+            await rescheduleTeacherBooking(bookingId, currentBooking, previousSlot);
+            await refreshRuntimeBusyBlocks({ force: true });
+            await refreshTeacherBookings();
+            await renderBookingCalendar();
+            setStatus(els.teacherBookingMsg, "Lesson move undone.", "success");
+        } catch (error) {
+            setStatus(els.teacherBookingMsg, error.message || "Could not undo the move.", "error");
+        } finally {
+            removeUndo();
+        }
+    });
+}
+
+function showTeacherBookingDetails(bookingId, booking) {
+    document.getElementById("teacherCalendarDetailsModal")?.remove();
+    const timezone = state.bookingSettings?.timezone || getTeacherTimezone();
+    const studentTimezone = booking.studentTimeZone || getDisplayTimezone();
+    const modal = document.createElement("div");
+    modal.id = "teacherCalendarDetailsModal";
+    modal.className = "teacher-calendar-details-modal";
+    modal.innerHTML = `
+        <div class="teacher-calendar-details-card" role="dialog" aria-modal="true" aria-labelledby="teacherCalendarDetailsTitle">
+            <button type="button" class="teacher-calendar-details-close" aria-label="Close">&times;</button>
+            <span class="teacher-calendar-details-kicker">${booking.isFreeTrial ? "Trial lesson" : "Student lesson"}</span>
+            <h3 id="teacherCalendarDetailsTitle">${escapeHtml(booking.name || "Student")}</h3>
+            <dl>
+                <div><dt>Teacher time</dt><dd>${escapeHtml(new Date(booking.slot).toLocaleString([], { dateStyle: "medium", timeStyle: "short", timeZone: timezone }))}</dd></div>
+                <div><dt>Student time</dt><dd>${escapeHtml(new Date(booking.slot).toLocaleString([], { dateStyle: "medium", timeStyle: "short", timeZone: studentTimezone }))}</dd></div>
+                <div><dt>Email</dt><dd>${escapeHtml(booking.email || "Not provided")}</dd></div>
+                <div><dt>Phone</dt><dd>${escapeHtml(booking.phone || "Not provided")}</dd></div>
+            </dl>
+            <div class="action-row">
+                <button type="button" class="btn btn--primary" data-details-action="reschedule">Reschedule</button>
+                <button type="button" class="btn btn--outline" data-details-action="repeat">Repeat weekly</button>
+                <button type="button" class="btn btn--outline" data-details-action="close">Close</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    const close = () => modal.remove();
+    modal.addEventListener("click", async (event) => {
+        if (event.target === modal || event.target.closest(".teacher-calendar-details-close") || event.target.closest("[data-details-action='close']")) {
+            close();
+            return;
+        }
+        if (event.target.closest("[data-details-action='reschedule']")) {
+            close();
+            await openRescheduleModal({
+                role: "teacher",
+                bookingId,
+                booking: { ...booking, id: bookingId },
+                allowCustom: true,
+            });
+            return;
+        }
+        if (event.target.closest("[data-details-action='repeat']")) {
+            const requestedCount = Number(window.prompt("How many additional weekly lessons? Enter 1–12.", "4"));
+            if (!Number.isInteger(requestedCount) || requestedCount < 1 || requestedCount > 12) return;
+            close();
+            try {
+                setAppLoading(true, "Creating weekly lessons...");
+                const result = await createWeeklyRecurringLessons(booking, requestedCount);
+                await refreshRuntimeBusyBlocks({ force: true });
+                await refreshTeacherBookings();
+                await renderBookingCalendar();
+                setStatus(
+                    els.teacherBookingMsg,
+                    `Created ${result.createdCount} weekly lesson${result.createdCount === 1 ? "" : "s"}.`,
+                    "success"
+                );
+            } catch (error) {
+                setStatus(els.teacherBookingMsg, error.message || "Could not create recurring lessons.", "error");
+            } finally {
+                setAppLoading(false);
+            }
+        }
     });
 }
 
@@ -1326,7 +2705,7 @@ async function openRescheduleModal({ role, bookingId, booking = null, allowCusto
     };
     if (els.rescheduleModalHint) {
         els.rescheduleModalHint.textContent = allowCustom
-            ? "Choose an available time, or enter a custom teacher time."
+            ? "Teacher access: choose a suggested time or enter any free future date and time, including within 12 hours."
             : "Choose an available teacher time.";
     }
     if (els.rescheduleCustomFields) {
@@ -1343,7 +2722,7 @@ async function createCalendarEventForBooking(bookingId, booking, slot) {
     return window.createBookingViaAppsScript({
         bookingId,
         slot,
-        durationMinutes: state.bookingSettings.slotMinutes || 50,
+        durationMinutes: booking.durationMinutes || booking.slotMinutes || state.bookingSettings.slotMinutes || 50,
         timeZone: getTeacherTimezone(),
         teacherEmail: (state.contactSettings?.email || "").trim(),
         name: booking.name || "Student",
@@ -1355,9 +2734,794 @@ async function createCalendarEventForBooking(bookingId, booking, slot) {
     });
 }
 
+function getWeeklyRecurringSlot(slot, weekNumber, timezone) {
+    const parts = getZonedParts(new Date(slot), timezone);
+    const dateKey = `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+    const recurringDateKey = addDaysToDateKey(dateKey, weekNumber * 7);
+    const [year, month, day] = recurringDateKey.split("-").map(Number);
+    return zonedDateTimeToUtcMs(timezone, year, month, day, parts.hour, parts.minute);
+}
+
+async function createWeeklyRecurringLessons(booking, additionalCount) {
+    const timezone = state.bookingSettings?.timezone || getTeacherTimezone();
+    const durationMinutes = Number(booking.durationMinutes || booking.slotMinutes || state.bookingSettings?.slotMinutes || 50);
+    const candidateSlots = [];
+    for (let index = 1; index <= additionalCount; index += 1) {
+        const slot = getWeeklyRecurringSlot(Number(booking.slot || 0), index, timezone);
+        const conflict = await findTeacherLessonConflict(slot, durationMinutes);
+        if (conflict) throw new Error(`Week ${index} overlaps another student lesson.`);
+        candidateSlots.push(slot);
+    }
+
+    let createdCount = 0;
+    for (const slot of candidateSlots) {
+        const bookingRef = window.db.collection("bookings").doc();
+        const createdAt = Date.now();
+        const recurringBooking = {
+            slot,
+            durationMinutes,
+            name: booking.name || "Student",
+            email: booking.email || "",
+            phone: booking.phone || "",
+            notes: booking.notes || "",
+            status: "booked",
+            createdAt,
+            updatedAt: createdAt,
+            calendarSynced: false,
+            googleCalendarEventId: "",
+            meetingUrl: "",
+            source: "teacher",
+            reason: booking.reason || "",
+            reasonLabels: Array.isArray(booking.reasonLabels) ? booking.reasonLabels : [],
+            level: booking.level || "",
+            lessonsPerMonth: booking.lessonsPerMonth || "",
+            studentTimeZone: booking.studentTimeZone || getDisplayTimezone(),
+            studentLocale: booking.studentLocale || "",
+            countryHint: booking.countryHint || "",
+            studentUid: booking.studentUid || "",
+            timezone,
+            isFreeTrial: false,
+            lessonPrice: Number(booking.lessonPrice) > 0 ? Number(booking.lessonPrice) : 15,
+            history: [{
+                at: createdAt,
+                action: "created_recurring",
+                by: "teacher",
+            }],
+        };
+        const publicBooking = {
+            slot,
+            durationMinutes,
+            status: "booked",
+            createdAt,
+            updatedAt: createdAt,
+            calendarSynced: false,
+            source: "teacher",
+        };
+        const batch = window.db.batch();
+        batch.set(bookingRef, recurringBooking);
+        batch.set(window.db.collection("publicBookings").doc(bookingRef.id), publicBooking);
+        await batch.commit();
+
+        const calendarResult = await createCalendarEventForBooking(bookingRef.id, recurringBooking, slot);
+        if (calendarResult?.success === false) {
+            const canceledAt = Date.now();
+            const cancelBatch = window.db.batch();
+            cancelBatch.set(bookingRef, {
+                status: "canceled",
+                updatedAt: canceledAt,
+                calendarSynced: false,
+                canceledAt,
+                canceledBy: "teacher",
+            }, { merge: true });
+            cancelBatch.set(window.db.collection("publicBookings").doc(bookingRef.id), {
+                status: "canceled",
+                updatedAt: canceledAt,
+                calendarSynced: false,
+            }, { merge: true });
+            await cancelBatch.commit();
+            throw new Error(calendarResult.message || "Google Calendar rejected a recurring lesson.");
+        }
+        await bookingRef.set({
+            calendarSynced: true,
+            googleCalendarEventId: calendarResult.eventId || "",
+            meetingUrl: calendarResult.meetingUrl || "",
+            updatedAt: Date.now(),
+        }, { merge: true });
+        await window.db.collection("publicBookings").doc(bookingRef.id).set({
+            calendarSynced: true,
+            updatedAt: Date.now(),
+        }, { merge: true });
+        createdCount += 1;
+    }
+    return { createdCount };
+}
+
+async function createTeacherLessonForStudent(student, slot, durationMinutes) {
+    const email = String(student.email || "").trim();
+    const studentUid = student.uid || student.id || student.studentUid || "";
+    if (!email || !studentUid) {
+        throw new Error("The selected student needs a valid account and email.");
+    }
+    const conflict = await findTeacherLessonConflict(slot, durationMinutes);
+    if (conflict) throw new Error("Another student lesson already occupies that time.");
+    const bookingRef = window.db.collection("bookings").doc();
+    const createdAt = Date.now();
+    const timezone = state.bookingSettings?.timezone || getTeacherTimezone();
+    const bookingData = {
+        slot,
+        durationMinutes,
+        name: student.name || student.displayName || email,
+        email,
+        phone: student.phone || "",
+        notes: "Scheduled directly by the teacher.",
+        status: "booked",
+        createdAt,
+        updatedAt: createdAt,
+        calendarSynced: false,
+        googleCalendarEventId: "",
+        meetingUrl: "",
+        source: "teacher",
+        reason: "Teacher scheduled lesson",
+        reasonLabels: ["Teacher scheduled"],
+        level: student.level || "",
+        lessonsPerMonth: student.lessonsPerMonth || "",
+        studentTimeZone: student.timezone || student.studentTimeZone || getDisplayTimezone(),
+        studentLocale: student.locale || "",
+        countryHint: student.country || "",
+        studentUid,
+        timezone,
+        isFreeTrial: false,
+        lessonPrice: Number(student.lessonPrice) > 0 ? Number(student.lessonPrice) : 15,
+        history: [{
+            at: createdAt,
+            action: "created_by_teacher",
+            by: "teacher",
+        }],
+    };
+    const publicBookingData = {
+        slot,
+        durationMinutes,
+        status: "booked",
+        createdAt,
+        updatedAt: createdAt,
+        calendarSynced: false,
+        source: "teacher",
+    };
+    const batch = window.db.batch();
+    batch.set(bookingRef, bookingData);
+    batch.set(window.db.collection("publicBookings").doc(bookingRef.id), publicBookingData);
+    await batch.commit();
+
+    const calendarResult = await createCalendarEventForBooking(bookingRef.id, bookingData, slot);
+    if (calendarResult?.success === false) {
+        const canceledAt = Date.now();
+        const cancelBatch = window.db.batch();
+        cancelBatch.set(bookingRef, {
+            status: "canceled",
+            updatedAt: canceledAt,
+            canceledAt,
+            canceledBy: "teacher",
+        }, { merge: true });
+        cancelBatch.set(window.db.collection("publicBookings").doc(bookingRef.id), {
+            status: "canceled",
+            updatedAt: canceledAt,
+        }, { merge: true });
+        await cancelBatch.commit();
+        throw new Error(calendarResult.message || "Google Calendar rejected the lesson.");
+    }
+    const syncedAt = Date.now();
+    const syncBatch = window.db.batch();
+    syncBatch.set(bookingRef, {
+        calendarSynced: true,
+        googleCalendarEventId: calendarResult.eventId || "",
+        meetingUrl: calendarResult.meetingUrl || "",
+        updatedAt: syncedAt,
+    }, { merge: true });
+    syncBatch.set(window.db.collection("publicBookings").doc(bookingRef.id), {
+        calendarSynced: true,
+        updatedAt: syncedAt,
+    }, { merge: true });
+    await syncBatch.commit();
+    return { bookingId: bookingRef.id };
+}
+
+function getTeacherSchedulingStudents() {
+    const byId = new Map();
+    const students = Array.isArray(state.studentsCache) ? state.studentsCache : [];
+    students.forEach((student) => {
+        const id = student.id || student.uid || student.studentUid;
+        if (id) byId.set(id, { ...student, id });
+    });
+    if (state.studentCache instanceof Map) {
+        state.studentCache.forEach((student, id) => {
+            byId.set(id, { ...(byId.get(id) || {}), ...student, id });
+        });
+    }
+    return Array.from(byId.values()).sort((a, b) => (
+        String(a.name || a.email || "").localeCompare(String(b.name || b.email || ""))
+    ));
+}
+
+function openTeacherCalendarCreateModal(slot, { column = null, details = null } = {}) {
+    document.getElementById("teacherCalendarCreateModal")?.remove();
+    const students = getTeacherSchedulingStudents();
+    const timezone = state.bookingSettings?.timezone || getTeacherTimezone();
+    const defaultDuration = Number(state.bookingSettings?.slotMinutes || 50);
+    const dateKey = getDateKey(new Date(slot), timezone);
+    const formatInputTime = (value) => new Date(value).toLocaleTimeString("en-GB", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+        timeZone: timezone,
+    });
+    const startTime = formatInputTime(slot);
+    const endTime = formatInputTime(slot + 60 * 60000);
+    let selectionPreview = showTeacherCalendarSelectionPreview(
+        column,
+        details || getTeacherCalendarDropDetails(column, 0, { durationMinutes: defaultDuration }),
+        "New student lesson"
+    );
+    const modal = document.createElement("div");
+    modal.id = "teacherCalendarCreateModal";
+    modal.className = "teacher-calendar-details-modal teacher-calendar-create-modal";
+    modal.innerHTML = `
+        <form class="teacher-calendar-details-card teacher-calendar-create-card">
+            <button type="button" class="teacher-calendar-details-close" aria-label="Close">&times;</button>
+            <span class="teacher-calendar-details-kicker" data-create-kicker>Student lesson</span>
+            <h3>${escapeHtml(new Date(slot).toLocaleString([], { dateStyle: "medium", timeStyle: "short", timeZone: timezone }))}</h3>
+            <label class="field">
+                <span>What do you want to add?</span>
+                <select name="entryType">
+                    <option value="lesson">Student lesson</option>
+                    <option value="busy">Busy time</option>
+                </select>
+            </label>
+            <label class="field" data-create-student-field>
+                <span>Student</span>
+                <select name="studentId" required>
+                    <option value="">Choose a student</option>
+                    ${students.map((student) => `<option value="${escapeHtml(student.id)}">${escapeHtml(student.name || student.email || "Student")} · ${escapeHtml(student.email || "")}</option>`).join("")}
+                </select>
+            </label>
+            <label class="field" data-create-busy-field hidden>
+                <span data-create-label-text>Busy label</span>
+                <input name="busyTitle" maxlength="120" value="Busy" />
+            </label>
+            <label class="field" data-create-duration-field>
+                <span>Lesson duration</span>
+                <select name="durationMinutes">
+                    ${[30, 45, 50, 60, 75, 90, 120].map((minutes) => `<option value="${minutes}" ${minutes === defaultDuration ? "selected" : ""}>${minutes} minutes</option>`).join("")}
+                </select>
+            </label>
+            <div class="inline-fields" data-create-busy-time-fields hidden>
+                <label class="field">
+                    <span>Busy from</span>
+                    <input name="busyStart" type="time" step="300" value="${startTime}" />
+                </label>
+                <label class="field">
+                    <span>Busy until</span>
+                    <input name="busyEnd" type="time" step="300" value="${endTime}" />
+                </label>
+            </div>
+            <p class="status-line" data-create-status></p>
+            <div class="action-row">
+                <button type="submit" class="btn btn--primary">Add to calendar</button>
+                <button type="button" class="btn btn--outline" data-create-close>Cancel</button>
+            </div>
+        </form>
+    `;
+    document.body.appendChild(modal);
+    const form = modal.querySelector("form");
+    const typeSelect = form.querySelector("[name='entryType']");
+    const studentField = form.querySelector("[data-create-student-field]");
+    const busyField = form.querySelector("[data-create-busy-field]");
+    const durationField = form.querySelector("[data-create-duration-field]");
+    const busyTimeFields = form.querySelector("[data-create-busy-time-fields]");
+    const kicker = form.querySelector("[data-create-kicker]");
+    const close = () => {
+        clearTeacherCalendarSelectionPreview();
+        modal.remove();
+    };
+    const getBusyRange = () => {
+        const [year, month, day] = dateKey.split("-").map(Number);
+        const [startHour, startMinute] = String(form.elements.busyStart.value || "").split(":").map(Number);
+        const [endHour, endMinute] = String(form.elements.busyEnd.value || "").split(":").map(Number);
+        if (![startHour, startMinute, endHour, endMinute].every(Number.isFinite)) return null;
+        const busySlot = zonedDateTimeToUtcMs(timezone, year, month, day, startHour, startMinute);
+        const busyEnd = zonedDateTimeToUtcMs(timezone, year, month, day, endHour, endMinute);
+        if (busyEnd <= busySlot) return null;
+        return {
+            slot: busySlot,
+            durationMinutes: Math.round((busyEnd - busySlot) / 60000),
+            top: startHour * 60 + startMinute - Number(column?.dataset.calendarStartHour || 8) * 60,
+            height: Math.round((busyEnd - busySlot) / 60000),
+        };
+    };
+    const updateSelectionPreview = () => {
+        if (!column) return;
+        const isBusy = typeSelect.value === "busy";
+        let previewDetails;
+        let label;
+        if (isBusy) {
+            previewDetails = getBusyRange();
+            label = form.elements.busyTitle.value.trim() || "Busy";
+        } else {
+            const durationMinutes = Number(form.elements.durationMinutes.value || defaultDuration);
+            previewDetails = {
+                ...(details || {}),
+                slot,
+                height: durationMinutes,
+            };
+            const selectedStudent = students.find((item) => item.id === form.elements.studentId.value);
+            label = selectedStudent
+                ? `Lesson with ${selectedStudent.name || selectedStudent.email || "student"}`
+                : "New student lesson";
+        }
+        if (!previewDetails) {
+            clearTeacherCalendarSelectionPreview();
+            selectionPreview = null;
+            return;
+        }
+        selectionPreview = showTeacherCalendarSelectionPreview(column, previewDetails, label);
+    };
+    const syncType = () => {
+        const isBusy = typeSelect.value === "busy";
+        studentField.hidden = isBusy;
+        busyField.hidden = !isBusy;
+        durationField.hidden = isBusy;
+        busyTimeFields.hidden = !isBusy;
+        studentField.style.display = isBusy ? "none" : "";
+        busyField.style.display = isBusy ? "" : "none";
+        durationField.style.display = isBusy ? "none" : "";
+        busyTimeFields.style.display = isBusy ? "grid" : "none";
+        kicker.textContent = isBusy ? "Busy time" : "Student lesson";
+        form.querySelector("[name='studentId']").required = !isBusy;
+        updateSelectionPreview();
+    };
+    typeSelect.addEventListener("change", syncType);
+    form.elements.studentId.addEventListener("change", updateSelectionPreview);
+    form.elements.durationMinutes.addEventListener("change", updateSelectionPreview);
+    form.elements.busyTitle.addEventListener("input", updateSelectionPreview);
+    form.elements.busyStart.addEventListener("input", updateSelectionPreview);
+    form.elements.busyEnd.addEventListener("input", updateSelectionPreview);
+    modal.addEventListener("click", (event) => {
+        if (event.target === modal || event.target.closest(".teacher-calendar-details-close") || event.target.closest("[data-create-close]")) close();
+    });
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const submitButton = event.submitter;
+        const busyRange = typeSelect.value === "busy" ? getBusyRange() : null;
+        const selectedSlot = busyRange?.slot || slot;
+        const durationMinutes = busyRange?.durationMinutes || Number(form.elements.durationMinutes.value || defaultDuration);
+        try {
+            await withButtonLoading(submitButton, "Adding...", async () => {
+                if (typeSelect.value === "busy") {
+                    if (!busyRange) throw new Error("Choose a valid busy start and end time.");
+                    const result = await window.createBusyBlockViaAppsScript?.({
+                        slot: selectedSlot,
+                        durationMinutes,
+                        title: form.elements.busyTitle.value || "Busy",
+                    });
+                    if (!result?.success) throw new Error(result?.message || "Could not add busy time.");
+                } else {
+                    const student = students.find((item) => item.id === form.elements.studentId.value);
+                    if (!student) throw new Error("Choose a student first.");
+                    await createTeacherLessonForStudent(student, selectedSlot, durationMinutes);
+                }
+                await refreshRuntimeBusyBlocks({ force: true });
+                await refreshTeacherBookings();
+                await renderBookingCalendar();
+            });
+            setStatus(
+                els.teacherBookingMsg,
+                typeSelect.value === "busy"
+                    ? "Busy time added to Google Calendar and student availability."
+                    : "Lesson created in the student schedule and Google Calendar.",
+                "success"
+            );
+            close();
+        } catch (error) {
+            setStatus(form.querySelector("[data-create-status]"), error.message || "Could not add the calendar entry.", "error");
+        }
+    });
+    syncType();
+}
+
+let currentClassroomBooking = null;
+let classroomTimerInterval = null;
+let classroomTimeRemaining = 50 * 60;
+let classroomTimerRunning = false;
+let wbCanvas = null;
+let wbCtx = null;
+let wbIsDrawing = false;
+let wbCurrentColor = "#0f172a";
+let wbCurrentTool = "pen"; // "pen", "highlighter", "eraser"
+let wbUnsubscribe = null;
+
+function initWhiteboard() {
+    wbCanvas = document.getElementById("classroomWhiteboard");
+    if (!wbCanvas) return;
+    wbCtx = wbCanvas.getContext("2d");
+
+    // Resize canvas to match display size
+    const rect = wbCanvas.parentElement.getBoundingClientRect();
+    wbCanvas.width = rect.width || 400;
+    wbCanvas.height = rect.height || 300;
+
+    wbCtx.lineCap = "round";
+    wbCtx.lineJoin = "round";
+
+    function getCoords(e) {
+        const r = wbCanvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        return {
+            x: clientX - r.left,
+            y: clientY - r.top
+        };
+    }
+
+    function startDraw(e) {
+        wbIsDrawing = true;
+        const coords = getCoords(e);
+        wbCtx.beginPath();
+        wbCtx.moveTo(coords.x, coords.y);
+    }
+
+    function draw(e) {
+        if (!wbIsDrawing) return;
+        e.preventDefault();
+        const coords = getCoords(e);
+
+        if (wbCurrentTool === "eraser") {
+            wbCtx.strokeStyle = "#ffffff";
+            wbCtx.lineWidth = 20;
+        } else if (wbCurrentTool === "highlighter") {
+            wbCtx.strokeStyle = "rgba(254, 240, 138, 0.4)";
+            wbCtx.lineWidth = 18;
+        } else {
+            wbCtx.strokeStyle = wbCurrentColor;
+            wbCtx.lineWidth = 3;
+        }
+
+        wbCtx.lineTo(coords.x, coords.y);
+        wbCtx.stroke();
+    }
+
+    function stopDraw() {
+        if (!wbIsDrawing) return;
+        wbIsDrawing = false;
+        wbCtx.closePath();
+        saveWhiteboardToCloud();
+    }
+
+    wbCanvas.onmousedown = startDraw;
+    wbCanvas.onmousemove = draw;
+    wbCanvas.onmouseup = stopDraw;
+    wbCanvas.onmouseleave = stopDraw;
+
+    wbCanvas.ontouchstart = startDraw;
+    wbCanvas.ontouchmove = draw;
+    wbCanvas.ontouchend = stopDraw;
+}
+
+function clearWhiteboard() {
+    if (!wbCtx || !wbCanvas) return;
+    wbCtx.clearRect(0, 0, wbCanvas.width, wbCanvas.height);
+    saveWhiteboardToCloud();
+}
+
+async function saveWhiteboardToCloud() {
+    if (!wbCanvas || !currentClassroomBooking || !currentClassroomBooking.id || !window.db) return;
+    try {
+        const dataUrl = wbCanvas.toDataURL("image/png");
+        await window.db.collection("bookings").doc(currentClassroomBooking.id).set({
+            boardDataUrl: dataUrl,
+            boardUpdatedAt: Date.now()
+        }, { merge: true });
+    } catch (e) {
+        console.error("Failed to sync whiteboard:", e);
+    }
+}
+
+function listenWhiteboardFromCloud(bookingId) {
+    if (!window.db || !bookingId) return;
+    if (wbUnsubscribe) wbUnsubscribe();
+
+    wbUnsubscribe = window.db.collection("bookings").doc(bookingId).onSnapshot((doc) => {
+        const data = doc.data();
+        if (data && data.boardDataUrl && wbCtx && wbCanvas) {
+            const img = new Image();
+            img.onload = () => {
+                wbCtx.clearRect(0, 0, wbCanvas.width, wbCanvas.height);
+                wbCtx.drawImage(img, 0, 0, wbCanvas.width, wbCanvas.height);
+            };
+            img.src = data.boardDataUrl;
+        }
+    });
+}
+
+async function recoverClassroomMeetingUrl(booking) {
+    if (!booking?.id || !booking?.slot || typeof window.createBookingViaAppsScript !== "function") return "";
+    const result = await window.createBookingViaAppsScript({
+        bookingId: booking.id,
+        slot: booking.slot,
+        durationMinutes: booking.durationMinutes || booking.slotMinutes || state.bookingSettings?.slotMinutes || 50,
+        timeZone: booking.timezone || state.bookingSettings?.timezone || getLocalTimezone(),
+        name: booking.name || "",
+        email: booking.email || "",
+        phone: booking.phone || "",
+        notes: booking.notes || "",
+    });
+    const meetingUrl = normalizeMeetingUrl(result?.meetingUrl);
+    if (!result?.success || !meetingUrl) return "";
+    if (window.db) {
+        await window.db.collection("bookings").doc(booking.id).set({
+            calendarSynced: true,
+            googleCalendarEventId: result.eventId || booking.googleCalendarEventId || null,
+            meetingUrl,
+            updatedAt: Date.now(),
+            history: window.firebase.firestore.FieldValue.arrayUnion({
+                at: Date.now(),
+                action: "meeting-link-recovered",
+                by: "system",
+            }),
+        }, { merge: true });
+    }
+    booking.meetingUrl = meetingUrl;
+    return meetingUrl;
+}
+
+async function openClassroomDirectly(booking) {
+    const accessState = getLessonAccessState(booking?.slot);
+    if (!accessState.canEnter) {
+        const message = accessState.reason === "too-early"
+            ? `The classroom opens 15 minutes before the lesson. ${getLessonEntryLabel(accessState)}.`
+            : "This lesson classroom is no longer available.";
+        window.alert(message);
+        return;
+    }
+    let url = getClassroomMeetingUrl(booking);
+    if (!url) {
+        setAppLoading(true, "Preparing your Google Meet room...");
+        try {
+            url = await recoverClassroomMeetingUrl(booking);
+        } finally {
+            setAppLoading(false);
+        }
+        if (!url) {
+            window.alert("The Google Meet room could not be prepared. Ask the teacher to sync this booking from the calendar settings.");
+            return;
+        }
+    }
+    window.location.assign(url);
+}
+
+function openClassroomModal(booking) {
+    currentClassroomBooking = booking;
+    const modal = document.getElementById("classroomModal");
+    const container = document.getElementById("classroomVideoContainer");
+    const subHeader = document.getElementById("classroomSubHeader");
+    const notesTextarea = document.getElementById("classroomNotesTextarea");
+    const statusMsg = document.getElementById("classroomStatusMsg");
+
+    if (!modal) return;
+
+    if (subHeader) {
+        const studentName = booking.name || "Student";
+        const timeLabel = booking.slot ? formatSlotTime(booking.slot) : "Active Lesson";
+        subHeader.textContent = `${studentName} — ${timeLabel}`;
+    }
+
+    if (container) {
+        const meetingUrl = getClassroomMeetingUrl(booking);
+        container.innerHTML = `
+            <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:32px; text-align:center; width:100%; min-height:420px;">
+                <strong style="font-size:1.2rem;">Open the video lesson in a new tab</strong>
+                <p class="small-note" style="max-width:520px;">Google Meet opens securely in its own page.</p>
+                <a class="btn btn--primary" href="${escapeHtml(meetingUrl)}" target="_blank" rel="noopener noreferrer">Open Meeting Room</a>
+            </div>
+        `;
+    }
+
+    if (notesTextarea) {
+        notesTextarea.value = booking.classroomNotes || booking.notes || "";
+    }
+    if (statusMsg) setStatus(statusMsg, "");
+
+    modal.classList.add("modal--open");
+
+    setTimeout(() => {
+        initWhiteboard();
+        if (booking.id) listenWhiteboardFromCloud(booking.id);
+    }, 150);
+
+    // Auto-start 50-minute lesson timer countdown
+    autoStartClassroomTimer();
+}
+
+function closeClassroomModal() {
+    const modal = document.getElementById("classroomModal");
+    const container = document.getElementById("classroomVideoContainer");
+    if (modal) modal.classList.remove("modal--open");
+    if (container) container.innerHTML = "";
+    if (classroomTimerInterval) clearInterval(classroomTimerInterval);
+    if (wbUnsubscribe) wbUnsubscribe();
+    classroomTimerRunning = false;
+}
+
+function autoStartClassroomTimer() {
+    if (classroomTimerInterval) clearInterval(classroomTimerInterval);
+    classroomTimeRemaining = 50 * 60;
+    classroomTimerRunning = true;
+    updateClassroomTimerDisplay();
+
+    classroomTimerInterval = setInterval(() => {
+        if (classroomTimeRemaining > 0) {
+            classroomTimeRemaining -= 1;
+            updateClassroomTimerDisplay();
+        } else {
+            clearInterval(classroomTimerInterval);
+            classroomTimerRunning = false;
+            handleAutomaticLessonCompletion();
+        }
+    }, 1000);
+}
+
+async function handleAutomaticLessonCompletion() {
+    const badge = document.getElementById("classroomAutoStatusBadge");
+    if (badge) {
+        badge.textContent = "✅ Lesson Completed Automatically!";
+        badge.style.background = "#059669";
+        badge.style.color = "#ffffff";
+    }
+
+    if (currentClassroomBooking && currentClassroomBooking.id) {
+        try {
+            await markBookingCompleted(currentClassroomBooking.id, currentClassroomBooking);
+            const statusMsg = document.getElementById("classroomStatusMsg");
+            if (statusMsg) setStatus(statusMsg, "🎉 Lesson finished! Auto-marked completed and +1 hour added to profile stats.", "success");
+        } catch (e) {
+            console.error("Auto-completion error:", e);
+        }
+    }
+}
+
+function updateClassroomTimerDisplay() {
+    const timerDisplay = document.getElementById("classroomTimerDisplay");
+    if (!timerDisplay) return;
+    const mins = Math.floor(classroomTimeRemaining / 60);
+    const secs = classroomTimeRemaining % 60;
+    timerDisplay.textContent = `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}
+
+function sendWhatsAppReminder(booking) {
+    const phone = (booking.phone || state.contactSettings.whatsapp || "").replace(/[^\d+]/g, "");
+    const studentName = booking.name || "Student";
+    const lessonTime = booking.slot ? formatSlotTime(booking.slot) : "soon";
+    const text = `Hello ${studentName}! 👋\nThis is a reminder for your Arabic lesson with Teacher Jaffer starting in 15 minutes at ${lessonTime}.\nInteractive Classroom Link:\n${window.location.origin}`;
+
+    let url = "";
+    if (phone && (phone.startsWith("+") || phone.length >= 9)) {
+        url = `https://wa.me/${phone.replace("+", "")}?text=${encodeURIComponent(text)}`;
+    } else {
+        url = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+}
+
+async function markBookingCompleted(bookingId, booking) {
+    if (!window.db) return;
+    await window.db.collection("bookings").doc(bookingId).set({
+        status: "completed",
+        completedAt: Date.now(),
+        updatedAt: Date.now()
+    }, { merge: true });
+
+    await window.db.collection("publicBookings").doc(bookingId).set({
+        status: "completed",
+        updatedAt: Date.now()
+    }, { merge: true });
+
+    // Auto-increment hours taught in profile settings
+    const currentHoursText = state.profileSettings?.hoursTaught || "1,200+";
+    const currentHoursNum = parseInt(currentHoursText.replace(/[^\d]/g, ""), 10) || 1200;
+    const newHoursNum = currentHoursNum + 1;
+    const hasPlus = currentHoursText.includes("+");
+    const newHoursText = `${newHoursNum.toLocaleString()}${hasPlus ? "+" : ""}`;
+
+    state.profileSettings.hoursTaught = newHoursText;
+    saveLocalProfileSettings("teacher_profile_v1", state.profileSettings);
+    await saveCloudProfileSettings(window.db, state.profileSettings);
+    renderProfileUi();
+}
+
 function wireStudentActions() {
     document.querySelectorAll("[data-target]").forEach((button) => {
         button.addEventListener("click", () => showScreen(button.getAttribute("data-target")));
+    });
+
+    const closeStudentPayment = () => {
+        if (els.studentPaymentCard) els.studentPaymentCard.hidden = true;
+    };
+    els.studentPaymentOpenBtn?.addEventListener("click", () => {
+        if (!els.studentPaymentCard) return;
+        els.studentPaymentCard.hidden = false;
+        window.setTimeout(() => els.studentPaymentCloseBtn?.focus(), 0);
+    });
+    els.studentPaymentCloseBtn?.addEventListener("click", closeStudentPayment);
+    els.studentPaymentCard?.addEventListener("click", (event) => {
+        if (event.target === els.studentPaymentCard) closeStudentPayment();
+    });
+
+    renderLessonFeedbackStars();
+    els.lessonFeedbackCard?.addEventListener("click", (event) => {
+        const ratingButton = event.target.closest("[data-feedback-rating][data-feedback-metric]");
+        if (!ratingButton) return;
+        const metric = ratingButton.dataset.feedbackMetric;
+        const value = Number(ratingButton.dataset.feedbackRating);
+        if (!LESSON_FEEDBACK_METRICS.some(([key]) => key === metric) || value < 1 || value > 5) return;
+        state.lessonFeedbackRatings[metric] = value;
+        renderLessonFeedbackStars();
+    });
+
+    els.lessonFeedbackLater?.addEventListener("click", () => {
+        state.lessonFeedbackDismissedBookingId = els.lessonFeedbackBookingId?.value || "";
+        hideLessonFeedbackCard();
+    });
+    els.lessonFeedbackClose?.addEventListener("click", () => {
+        state.lessonFeedbackDismissedBookingId = els.lessonFeedbackBookingId?.value || "";
+        hideLessonFeedbackCard();
+    });
+    els.lessonFeedbackReminder?.addEventListener("click", () => {
+        state.lessonFeedbackDismissedBookingId = "";
+        openLessonFeedbackCard();
+    });
+
+    els.lessonFeedbackForm?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const bookingId = els.lessonFeedbackBookingId?.value || "";
+        if (!bookingId || !state.currentUser || state.currentRole !== "student") return;
+        setStatus(els.lessonFeedbackMsg, "");
+        try {
+            await withButtonLoading(els.lessonFeedbackSubmit, "Submitting...", async () => {
+                const bookingSnap = await window.db.collection("bookings").doc(bookingId).get();
+                if (!bookingSnap.exists) throw new Error("Lesson booking was not found.");
+                const booking = bookingSnap.data() || {};
+                if (booking.studentUid !== state.currentUser.uid) throw new Error("This lesson does not belong to your account.");
+                if (getLessonEndMs(booking) > Date.now()) throw new Error("Feedback opens after the lesson ends.");
+                const ratings = { ...state.lessonFeedbackRatings };
+                if (LESSON_FEEDBACK_METRICS.some(([key]) => Number(ratings[key] || 0) < 1)) {
+                    throw new Error("Please choose a star rating for every item.");
+                }
+                const overall = LESSON_FEEDBACK_METRICS.reduce((sum, [key]) => sum + Number(ratings[key]), 0) / LESSON_FEEDBACK_METRICS.length;
+                await window.db.collection("lessonFeedback").doc(bookingId).set({
+                    bookingId,
+                    studentUid: state.currentUser.uid,
+                    lessonSlot: Number(booking.slot || 0),
+                    lessonDurationMinutes: Number(booking.durationMinutes || 50),
+                    ratings,
+                    overall,
+                    comment: String(els.lessonFeedbackComment?.value || "").trim(),
+                    createdAt: Date.now(),
+                });
+            });
+            setStatus(els.lessonFeedbackMsg, "Thank you. Your lesson feedback was saved privately.", "success");
+            window.setTimeout(() => {
+                state.pendingLessonFeedbackBooking = null;
+                if (els.lessonFeedbackReminder) els.lessonFeedbackReminder.hidden = true;
+                hideLessonFeedbackCard();
+                if (els.lessonFeedbackComment) els.lessonFeedbackComment.value = "";
+            }, 1200);
+        } catch (error) {
+            setStatus(els.lessonFeedbackMsg, error.message || "Could not save lesson feedback.", "error");
+        }
+    });
+
+    document.addEventListener("visibilitychange", () => {
+        if (!document.hidden && state.currentRole === "student") {
+            loadStudentBookings().catch(console.error);
+        }
     });
 
     els.openStudentGateBtn?.addEventListener("click", (event) => {
@@ -1372,12 +3536,36 @@ function wireStudentActions() {
         setStatus(els.studentAuthMsg, "");
     });
 
+    els.bookFreeTrialBtn?.addEventListener("click", (event) => {
+        if (isStudentSignedIn()) {
+            withButtonLoading(event.currentTarget, "Loading schedule...", async () => {
+                showScreen("student-screen");
+                await ensureBookingCalendarLoaded();
+            }).catch(console.error);
+            return;
+        }
+        setStudentAuthMode("signup");
+        els.studentAuthModal?.classList.add("modal--open");
+        setStatus(els.studentAuthMsg, "Create an account or sign in to book your Free Trial Lesson!", "success");
+    });
+
+    els.welcomeWhatsappBtn?.addEventListener("click", () => {
+        const message = "Hello Jaffer! I would like to inquire about booking a free trial lesson.";
+        const url = buildWhatsAppUrl(state.contactSettings, message);
+        if (!url) {
+            alert("WhatsApp contact is not configured yet.");
+            return;
+        }
+        window.open(url, "_blank", "noopener,noreferrer");
+    });
+
     els.openTeacherGateBtn?.addEventListener("click", (event) => {
         if (state.teacherUser && state.teacherRole === "teacher") {
-            withButtonLoading(event.currentTarget, "Loading...", async () => {
-                showScreen("teacher-screen");
-                await refreshTeacherDashboard();
-            }).catch(console.error);
+            showScreen("teacher-screen");
+            refreshTeacherDashboard().catch((error) => {
+                console.error("Could not refresh teacher dashboard.", error);
+                setStatus(els.teacherAuthMsg, "The dashboard opened, but some data could not refresh.", "error");
+            });
             return;
         }
         els.teacherLoginModal?.classList.add("modal--open");
@@ -1460,6 +3648,71 @@ function wireStudentActions() {
         await withButtonLoading(els.studentLogoutBtn, "Signing out...", () => window.auth.signOut());
     });
 
+    els.studentDeleteAccountBtn?.addEventListener("click", () => {
+        if (!isStudentSignedIn()) return;
+        if (els.studentDeleteAccountPassword) els.studentDeleteAccountPassword.value = "";
+        setStatus(els.studentDeleteAccountMsg, "");
+        els.studentDeleteAccountModal?.classList.add("modal--open");
+        window.setTimeout(() => els.studentDeleteAccountPassword?.focus(), 0);
+    });
+
+    els.studentDeleteAccountForm?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const user = window.auth?.currentUser;
+        const password = els.studentDeleteAccountPassword?.value || "";
+        if (!user || state.currentRole !== "student") {
+            setStatus(els.studentDeleteAccountMsg, "Please sign in again before deleting your account.", "error");
+            return;
+        }
+        if (!user.email || !password) {
+            setStatus(els.studentDeleteAccountMsg, "Enter your password to continue.", "error");
+            return;
+        }
+
+        const profileBackup = {
+            ...(state.studentProfile || {}),
+            email: state.studentProfile?.email || user.email,
+            role: "student",
+        };
+        let profileDeleted = false;
+        try {
+            setButtonLoading(els.studentDeleteAccountConfirmBtn, true, "Deleting...");
+            setStatus(els.studentDeleteAccountMsg, "Verifying your password...");
+            const credential = window.firebase.auth.EmailAuthProvider.credential(user.email, password);
+            await user.reauthenticateWithCredential(credential);
+
+            stopStudentProfileListener();
+            await window.db.collection("users").doc(user.uid).delete();
+            profileDeleted = true;
+            await user.delete();
+
+            els.studentDeleteAccountModal?.classList.remove("modal--open");
+            if (els.studentDeleteAccountPassword) els.studentDeleteAccountPassword.value = "";
+            showScreen("welcome-screen");
+        } catch (error) {
+            if (profileDeleted && window.auth?.currentUser) {
+                try {
+                    await window.db.collection("users").doc(user.uid).set(profileBackup, { merge: true });
+                    startStudentProfileListener();
+                } catch (restoreError) {
+                    console.error("Could not restore student profile after account deletion failed.", restoreError);
+                }
+            }
+            const message = error?.code === "auth/wrong-password" || error?.code === "auth/invalid-credential"
+                ? "The password is incorrect."
+                : (error?.message || "Could not delete your account. Please try again.");
+            setStatus(els.studentDeleteAccountMsg, message, "error");
+        } finally {
+            setButtonLoading(els.studentDeleteAccountConfirmBtn, false);
+        }
+    });
+
+    els.requestCourseAccessBtn?.addEventListener("click", async () => {
+        await withButtonLoading(els.requestCourseAccessBtn, "Sending...", requestFullCourseAccess).catch((error) => {
+            setStatus(els.courseAccessRequestMsg, error.message || "Could not send access request.", "error");
+        });
+    });
+
     els.bookingWeekPrev?.addEventListener("click", (event) => {
         withButtonLoading(event.currentTarget, "Loading...", async () => {
             state.bookingWeekOffset = Math.max(0, state.bookingWeekOffset - 1);
@@ -1478,6 +3731,39 @@ function wireStudentActions() {
             await refreshRuntimeBusyBlocks();
             await renderBookingCalendar();
         }).catch(console.error);
+    });
+
+    els.studentTimezoneSelect?.addEventListener("change", async (event) => {
+        const tz = event.target.value;
+        state.studentTimezone = tz;
+
+        if (els.selectedTimezoneName) els.selectedTimezoneName.textContent = tz;
+        if (els.selectedTimezoneOffset) els.selectedTimezoneOffset.textContent = formatTimezoneGmt(tz);
+
+        showBookingCalendarLoading();
+        await renderBookingCalendar();
+    });
+
+    els.preplyReviewsSort?.addEventListener("change", (event) => {
+        state.reviewsSortMode = event.target.value;
+        state.reviewsExpanded = false;
+        renderReviewsUi();
+    });
+
+    els.studentReviewsToggleBtn?.addEventListener("click", () => {
+        state.reviewsExpanded = !state.reviewsExpanded;
+        renderReviewsUi();
+        if (!state.reviewsExpanded) {
+            els.studentReviewsSection?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+    });
+
+    els.viewFullScheduleBtn?.addEventListener("click", () => {
+        state.showAllSlots = !state.showAllSlots;
+        if (els.viewFullScheduleBtn) {
+            els.viewFullScheduleBtn.textContent = state.showAllSlots ? "View simple schedule" : "View full schedule";
+        }
+        renderBookingCalendar().catch(console.error);
     });
 
     els.bookingDayPrev?.addEventListener("click", (event) => {
@@ -1524,9 +3810,31 @@ function wireStudentActions() {
                 if (panel) panel.innerHTML = "";
                 return;
             }
+            if (action === "classroom") {
+                if (bookingId.startsWith("demo-")) {
+                    openClassroomDirectly({ id: bookingId, name: state.currentUser?.displayName || "Student" });
+                    return;
+                }
+                const bookingSnap = await window.db.collection("bookings").doc(bookingId).get();
+                const booking = { id: bookingSnap.id, ...(bookingSnap.data() || {}) };
+                openClassroomDirectly(booking);
+                return;
+            }
+            if (action === "whatsapp-reminder") {
+                const bookingSnap = await window.db.collection("bookings").doc(bookingId).get();
+                const booking = { id: bookingSnap.id, ...(bookingSnap.data() || {}) };
+                sendWhatsAppReminder(booking);
+                return;
+            }
             if (action === "cancel") {
-                await cancelStudentBooking(bookingId);
-                setStatus(els.bookingStatusMsg, "Booking canceled.", "success");
+                const result = await cancelStudentBooking(bookingId);
+                setStatus(
+                    els.bookingStatusMsg,
+                    result.calendarDeletePending
+                        ? "Booking canceled. Calendar removal will be retried."
+                        : "Booking canceled.",
+                    "success"
+                );
                 await loadStudentBookings();
                 await renderBookingCalendar();
                 return;
@@ -1671,6 +3979,126 @@ function wireStudentActions() {
         });
     });
 
+    document.querySelectorAll("[data-close-delete-account-modal]").forEach((button) => {
+        button.addEventListener("click", () => {
+            els.studentDeleteAccountModal?.classList.remove("modal--open");
+            if (els.studentDeleteAccountPassword) els.studentDeleteAccountPassword.value = "";
+            setStatus(els.studentDeleteAccountMsg, "");
+        });
+    });
+
+    document.querySelectorAll("[data-close-classroom-modal]").forEach((button) => {
+        button.addEventListener("click", () => closeClassroomModal());
+    });
+
+    const tabBoardBtn = document.getElementById("classroomTabBoardBtn");
+    const tabNotesBtn = document.getElementById("classroomTabNotesBtn");
+    const tabMaterialsBtn = document.getElementById("classroomTabMaterialsBtn");
+
+    const boardTab = document.getElementById("classroomBoardTab");
+    const notesTab = document.getElementById("classroomNotesTab");
+    const materialsTab = document.getElementById("classroomMaterialsTab");
+
+    tabBoardBtn?.addEventListener("click", () => {
+        if (boardTab) boardTab.style.display = "flex";
+        if (notesTab) notesTab.style.display = "none";
+        if (materialsTab) materialsTab.style.display = "none";
+        tabBoardBtn.className = "btn btn--small btn--primary";
+        if (tabNotesBtn) tabNotesBtn.className = "btn btn--small btn--ghost";
+        if (tabMaterialsBtn) tabMaterialsBtn.className = "btn btn--small btn--ghost";
+        setTimeout(() => initWhiteboard(), 100);
+    });
+
+    tabNotesBtn?.addEventListener("click", () => {
+        if (boardTab) boardTab.style.display = "none";
+        if (notesTab) notesTab.style.display = "flex";
+        if (materialsTab) materialsTab.style.display = "none";
+        tabNotesBtn.className = "btn btn--small btn--primary";
+        if (tabBoardBtn) tabBoardBtn.className = "btn btn--small btn--ghost";
+        if (tabMaterialsBtn) tabMaterialsBtn.className = "btn btn--small btn--ghost";
+    });
+
+    tabMaterialsBtn?.addEventListener("click", () => {
+        if (boardTab) boardTab.style.display = "none";
+        if (notesTab) notesTab.style.display = "none";
+        if (materialsTab) materialsTab.style.display = "flex";
+        tabMaterialsBtn.className = "btn btn--small btn--primary";
+        if (tabBoardBtn) tabBoardBtn.className = "btn btn--small btn--ghost";
+        if (tabNotesBtn) tabNotesBtn.className = "btn btn--small btn--ghost";
+    });
+
+    // Whiteboard tool buttons
+    document.getElementById("wbColorPicker")?.addEventListener("change", (e) => {
+        wbCurrentColor = e.target.value;
+        wbCurrentTool = "pen";
+    });
+
+    document.getElementById("wbPenBtn")?.addEventListener("click", () => {
+        wbCurrentTool = "pen";
+    });
+
+    document.getElementById("wbHighlighterBtn")?.addEventListener("click", () => {
+        wbCurrentTool = "highlighter";
+    });
+
+    document.getElementById("wbEraserBtn")?.addEventListener("click", () => {
+        wbCurrentTool = "eraser";
+    });
+
+    document.getElementById("wbClearBtn")?.addEventListener("click", () => {
+        clearWhiteboard();
+    });
+
+    document.getElementById("wbSyncBtn")?.addEventListener("click", () => {
+        saveWhiteboardToCloud();
+    });
+
+    document.getElementById("classroomLaunchNewTabBtn")?.addEventListener("click", () => {
+        const url = getClassroomMeetingUrl(currentClassroomBooking);
+        window.open(url, "_blank", "noopener,noreferrer");
+    });
+
+    document.getElementById("saveClassroomNotesBtn")?.addEventListener("click", async (event) => {
+        const notesTextarea = document.getElementById("classroomNotesTextarea");
+        const statusMsg = document.getElementById("classroomStatusMsg");
+        if (!currentClassroomBooking || !currentClassroomBooking.id) {
+            if (statusMsg) setStatus(statusMsg, "Notes saved locally for this session.", "success");
+            return;
+        }
+        const notesValue = (notesTextarea?.value || "").trim();
+        await withButtonLoading(event.currentTarget, "Saving...", async () => {
+            await window.db.collection("bookings").doc(currentClassroomBooking.id).set({
+                classroomNotes: notesValue,
+                updatedAt: Date.now()
+            }, { merge: true });
+            currentClassroomBooking.classroomNotes = notesValue;
+            if (statusMsg) setStatus(statusMsg, "Classroom notes saved to lesson record!", "success");
+        }).catch((err) => {
+            if (statusMsg) setStatus(statusMsg, err.message || "Failed to save notes.", "error");
+        });
+    });
+
+    async function hasPriorStudentBooking(studentUid, email) {
+        if (!window.db || !studentUid) return false;
+        const bookings = new Map();
+        const uidSnap = await window.db
+            .collection("bookings")
+            .where("studentUid", "==", studentUid)
+            .get();
+        uidSnap.forEach((doc) => bookings.set(doc.id, doc.data() || {}));
+        const normalizedEmail = String(email || "").trim().toLowerCase();
+        if (normalizedEmail && uidSnap.empty) {
+            const emailSnap = await window.db
+                .collection("bookings")
+                .where("email", "==", normalizedEmail)
+                .get();
+            emailSnap.forEach((doc) => bookings.set(doc.id, doc.data() || {}));
+        }
+        return Array.from(bookings.values()).some((booking) => {
+            return String(booking.status || "booked").toLowerCase() !== "canceled";
+        });
+    }
+
     els.bookingForm?.addEventListener("submit", async (event) => {
         event.preventDefault();
         if (!isStudentSignedIn()) {
@@ -1678,7 +4106,36 @@ function wireStudentActions() {
             els.studentAuthModal?.classList.add("modal--open");
             return;
         }
+
+        const profile = state.studentProfile || {};
         const email = (state.currentUser.email || "").trim().toLowerCase();
+        const hasPriorBooking = profile.trialUsed === true
+            ? true
+            : await hasPriorStudentBooking(state.currentUser.uid, email);
+        const isTrial = !hasPriorBooking;
+        if (hasPriorBooking && profile.trialUsed !== true) {
+            const trialUsedAt = Date.now();
+            await window.db.collection("users").doc(state.currentUser.uid).set({
+                trialUsed: true,
+                trialUsedAt,
+                updatedAt: window.firebase.firestore.FieldValue.serverTimestamp(),
+            }, { merge: true });
+            state.studentProfile = {
+                ...profile,
+                trialUsed: true,
+                trialUsedAt,
+            };
+            updateStudentAccountUi();
+        }
+        const balance = Number(profile.balance || 0);
+        const lessonPrice = Number(profile.lessonPrice) > 0 ? Number(profile.lessonPrice) : 15;
+        const allowOverdraft = profile.allowOverdraft === true;
+
+        if (!isTrial && !allowOverdraft && balance < lessonPrice) {
+            setStatus(els.bookingMsg, `Sorry, your balance is insufficient to book this lesson. (Required: $${lessonPrice}, Current: $${balance}). Please top up your account or contact the teacher.`, "error");
+            return;
+        }
+
         const name = getStudentName();
         const phone = getStudentPhone();
 
@@ -1705,12 +4162,16 @@ function wireStudentActions() {
                 countryHint: "",
                 recaptchaReady: true,
                 studentUid: state.currentUser.uid,
+                isFreeTrial: isTrial,
+                lessonPrice: isTrial ? 0 : lessonPrice,
             },
             bookingSubmit: els.bookingSubmit,
             bookingSubmitLabel: els.bookingSubmit?.querySelector(".btn__label"),
             bookingMsg: els.bookingMsg,
             bookingSuccessModal: els.bookingSuccessModal,
             bookingSuccessText: els.bookingSuccessText,
+            bookingSuccessWhatsAppBtn: els.bookingSuccessWhatsAppBtn,
+            bookingSuccessTrialIntro: els.bookingSuccessTrialIntro,
             bookingStatusEmail: els.bookingStatusEmail,
             refreshCalendarAvailability: async () => {
                 await refreshRuntimeBusyBlocks();
@@ -1721,11 +4182,188 @@ function wireStudentActions() {
                 return findBookingConflict(slotMs, bookingDeps());
             },
             buildBookingSelects: renderBookingCalendar,
-            hashEmail,
             createBookingViaAppsScript: window.createBookingViaAppsScript,
+            buildWhatsAppUrl,
             loadBookingStatus,
             isLocalDevHost,
         }));
+    });
+
+    if (els.studentRatingSelect && !els.studentRatingSelect.querySelector("option[value='1']")) {
+        els.studentRatingSelect.insertAdjacentHTML(
+            "beforeend",
+            '<option value="2">⭐⭐ (2/5 Needs Improvement)</option><option value="1">⭐ (1/5 Poor)</option>'
+        );
+    }
+
+    const reviewCharacterCount = document.getElementById("studentReviewCharacterCount");
+    const reviewPreview = document.getElementById("studentReviewPreview");
+    const updateReviewPreview = () => {
+        const text = (els.studentReviewText?.value || "").trim();
+        if (reviewCharacterCount) reviewCharacterCount.textContent = String(els.studentReviewText?.value.length || 0);
+        if (!reviewPreview) return;
+        reviewPreview.hidden = !text;
+        reviewPreview.innerHTML = text
+            ? `<span>${"★".repeat(Number(els.studentRatingSelect?.value || 5))}${"☆".repeat(5 - Number(els.studentRatingSelect?.value || 5))}</span><p>${escapeHtml(text)}</p>`
+            : "";
+    };
+    els.studentReviewText?.addEventListener("input", updateReviewPreview);
+    els.studentRatingSelect?.addEventListener("change", updateReviewPreview);
+
+    document.getElementById("studentReviewDraftBtn")?.addEventListener("click", () => {
+        const goal = (document.getElementById("studentReviewGoal")?.value || "").trim();
+        const progress = (document.getElementById("studentReviewProgress")?.value || "").trim();
+        const recommendation = document.getElementById("studentReviewRecommend")?.value || "yes";
+        const traits = Array.from(document.querySelectorAll("[data-review-trait]:checked"))
+            .map((input) => input.value);
+        const sentences = [];
+        if (goal) sentences.push(`I started lessons with Jaffer because I wanted to improve ${goal}.`);
+        if (traits.length) sentences.push(`I especially appreciate his ${traits.join(", ")}.`);
+        if (progress) sentences.push(`Since starting the lessons, I have improved my ${progress}.`);
+        if (recommendation === "yes") {
+            sentences.push("I would recommend Jaffer to anyone who wants to learn practical Palestinian Arabic.");
+        } else if (recommendation === "maybe") {
+            sentences.push("The lessons may be a good fit for students with similar learning goals.");
+        } else {
+            sentences.push("I think the learning experience could be improved further.");
+        }
+        if (!sentences.length) {
+            setStatus(els.studentReviewMsg, "Add your goal or choose what stood out first.", "error");
+            return;
+        }
+        if (els.studentReviewText) {
+            els.studentReviewText.value = sentences.join(" ");
+            els.studentReviewText.focus();
+            updateReviewPreview();
+        }
+        setStatus(els.studentReviewMsg, "Draft created. Please edit it so it reflects your honest experience.", "success");
+    });
+
+    els.studentReviewForm?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const profile = state.studentProfile || {};
+        if (profile.reviewRequested !== true || profile.hasSubmittedReview === true) {
+            setStatus(els.studentReviewMsg, "Review is not available right now.", "error");
+            syncStudentReviewUi();
+            return;
+        }
+        const rating = Number(els.studentRatingSelect?.value || 5);
+        const country = (els.studentReviewCountry?.value || "").trim();
+        const tag = (els.studentReviewTag?.value || "").trim();
+        const text = (els.studentReviewText?.value || "").trim();
+        if (text.length < 20) {
+            setStatus(els.studentReviewMsg, "Please write at least 20 characters.", "error");
+            return;
+        }
+
+        const user = state.currentUser;
+        const name = getStudentName() || user?.displayName || "Student";
+        const newReview = {
+            id: user?.uid || `rev_${Date.now()}`,
+            name,
+            country: country || "🌐 Student",
+            rating,
+            tag: tag || "Arabic Lesson",
+            date: new Date().toLocaleDateString("en-US", { month: "short", year: "numeric" }),
+            text,
+            avatar: name.substring(0, 2).toUpperCase(),
+            source: "Student Review",
+            studentUid: user?.uid || null,
+            createdAt: Date.now(),
+        };
+
+        try {
+            await withButtonLoading(els.studentReviewSubmit, "Submitting...", async () => {
+                await addReviewToCloud(window.db, newReview);
+                state.reviews.unshift(newReview);
+                saveLocalReviews("teacher_reviews_v1", state.reviews);
+                renderReviewsUi();
+
+                const key = `review_submitted_${user?.uid || user?.email || "guest"}`;
+                localStorage.setItem(key, "true");
+                if (user?.uid && window.db) {
+                    try {
+                        await window.db.collection("users").doc(user.uid).set({
+                            hasSubmittedReview: true,
+                            reviewRequested: false,
+                            reviewSubmittedAt: Date.now(),
+                        }, { merge: true });
+                        state.studentProfile = {
+                            ...(state.studentProfile || {}),
+                            hasSubmittedReview: true,
+                            reviewRequested: false,
+                            reviewSubmittedAt: Date.now(),
+                        };
+                    } catch (uErr) {
+                        console.warn("Could not update hasSubmittedReview on user profile:", uErr);
+                    }
+                }
+                syncStudentReviewUi();
+            });
+        } catch (error) {
+            let msg = error.message || "Could not submit review.";
+            try {
+                const parsed = JSON.parse(msg);
+                if (parsed.error) msg = parsed.error;
+            } catch (_) {}
+            setStatus(els.studentReviewMsg, msg, "error");
+        }
+    });
+
+    document.getElementById("packagesGrid")?.addEventListener("click", (event) => {
+        const card = event.target.closest("[data-package-lessons]");
+        if (!card) return;
+        document.querySelectorAll("#packagesGrid .package-card").forEach(c => c.classList.remove("is-selected"));
+        card.classList.add("is-selected");
+
+        const lessons = Number(card.dataset.packageLessons || 10);
+        const price = Number(card.dataset.packagePrice || 135);
+        const label = card.dataset.packageLabel || `${lessons} Lessons ($${price})`;
+
+        state.selectedPackage = { lessons, price, label };
+        const display = document.getElementById("selectedPackageDisplay");
+        if (display) display.textContent = label;
+    });
+
+    document.getElementById("requestCourseAccessBtn")?.addEventListener("click", async (event) => {
+        await withButtonLoading(event.currentTarget, "Sending...", async () => {
+            await requestFullCourseAccess();
+        });
+    });
+
+    document.getElementById("packageWhatsAppBtn")?.addEventListener("click", () => {
+        const pkg = state.selectedPackage || { lessons: 10, price: 135, label: "10 Lessons ($135)" };
+        const studentName = getStudentName() || (state.currentUser?.email || "Student");
+        const message = `Hello Jaffer! I am ${studentName}. I would like to pay/paid for the package: ${pkg.label}. Please confirm and add credits to my account.`;
+        const url = buildWhatsAppUrl(state.contactSettings, message);
+        if (!url) {
+            const msgEl = document.getElementById("courseAccessRequestMsg");
+            if (msgEl) setStatus(msgEl, "Teacher WhatsApp number is not configured yet in contact settings.", "error");
+            return;
+        }
+        window.open(url, "_blank", "noopener,noreferrer");
+    });
+
+    els.preplyBioToggleBtn?.addEventListener("click", () => {
+        const textEl = els.preplyBioText;
+        const toggleTextEl = els.preplyBioToggleText;
+        const chevronEl = els.preplyBioToggleChevron;
+        const fadeEl = els.bioFadeOverlay;
+
+        if (!textEl) return;
+
+        const isCollapsed = textEl.style.maxHeight === "180px" || !textEl.style.maxHeight;
+        if (isCollapsed) {
+            textEl.style.maxHeight = `${textEl.scrollHeight}px`;
+            if (toggleTextEl) toggleTextEl.textContent = "Read less";
+            if (chevronEl) chevronEl.style.transform = "rotate(180deg)";
+            if (fadeEl) fadeEl.style.opacity = "0";
+        } else {
+            textEl.style.maxHeight = "180px";
+            if (toggleTextEl) toggleTextEl.textContent = "Read more";
+            if (chevronEl) chevronEl.style.transform = "rotate(0deg)";
+            if (fadeEl) fadeEl.style.opacity = "1";
+        }
     });
 }
 
@@ -1752,28 +4390,79 @@ function syncTeacherFormFields() {
     if (els.teacherBreakMinutes) els.teacherBreakMinutes.value = String(state.bookingSettings.breakMinutes || 10);
     if (els.teacherWhatsapp) els.teacherWhatsapp.value = state.contactSettings.whatsapp || "";
     if (els.teacherContactEmail) els.teacherContactEmail.value = state.contactSettings.email || "";
+    if (els.teacherClassroomMeetingUrl) els.teacherClassroomMeetingUrl.value = state.contactSettings.classroomMeetingUrl || "";
+    const offers = state.bookingSettings.courseOffers || {};
+    if (els.courseAccessPrice) els.courseAccessPrice.value = String(offers.courseAccessPrice ?? 15);
+    if (els.courseAccessUnits) els.courseAccessUnits.value = String(offers.courseAccessUnits ?? 15);
+    if (els.freeTrialLessons) els.freeTrialLessons.value = String(offers.freeTrialLessons ?? 1);
+    if (els.paypalPaymentLink) els.paypalPaymentLink.value = String(offers.paypalPaymentLink ?? "");
+    if (els.paypalReminder) {
+        els.paypalReminder.value = offers.paypalReminder ||
+            "Just a quick reminder: when you choose to pay through PayPal, please choose Goods and Services. Choosing another option may affect my PayPal account.";
+    }
     renderTeacherDays();
     renderExceptions();
+    renderTeacherPackagesUi();
+
+    const lastSync = state.bookingSettings?.lastGoogleSync;
+    if (lastSync && els.googleSyncIndicator && els.googleSyncTime) {
+        try {
+            const date = new Date(lastSync);
+            const formatted = date.toLocaleString([], {
+                dateStyle: "medium",
+                timeStyle: "short",
+                timeZone: state.bookingSettings.timezone || getTeacherTimezone()
+            });
+            els.googleSyncTime.textContent = formatted;
+            els.googleSyncIndicator.style.display = "inline-flex";
+        } catch (e) {
+            console.error("Error formatting google last sync time:", e);
+            els.googleSyncIndicator.style.display = "none";
+        }
+    } else if (els.googleSyncIndicator) {
+        els.googleSyncIndicator.style.display = "none";
+    }
+}
+
+function getExceptionEndMs(item, timezone) {
+    const [year, month, day] = String(item?.date || "").split("-").map(Number);
+    const [endHour, endMinute] = String(item?.end || "").split(":").map(Number);
+    if (![year, month, day, endHour, endMinute].every(Number.isFinite)) return NaN;
+
+    const [startHour, startMinute] = String(item?.start || "").split(":").map(Number);
+    const crossesMidnight = [startHour, startMinute].every(Number.isFinite)
+        && endHour * 60 + endMinute <= startHour * 60 + startMinute;
+    const endDate = crossesMidnight ? addDaysToDateKey(item.date, 1) : item.date;
+    const [endYear, endMonth, endDay] = endDate.split("-").map(Number);
+    return zonedDateTimeToUtcMs(timezone, endYear, endMonth, endDay, endHour, endMinute);
 }
 
 function renderExceptions() {
     if (!els.exceptionList) return;
-    const exceptions = Array.isArray(state.bookingSettings.exceptions)
-        ? [...state.bookingSettings.exceptions]
-        : [];
-    exceptions.sort((a, b) => `${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`));
+    const now = Date.now();
+    const timezone = getTeacherTimezone();
+    const exceptions = (Array.isArray(state.bookingSettings.exceptions)
+        ? state.bookingSettings.exceptions
+        : [])
+        .map((item, originalIndex) => ({ item, originalIndex }))
+        .filter(({ item }) => {
+            if (!item?.date || !item?.end) return true;
+            const endMs = getExceptionEndMs(item, timezone);
+            return !Number.isFinite(endMs) || endMs > now;
+        });
+    exceptions.sort((a, b) => `${a.item.date} ${a.item.start}`.localeCompare(`${b.item.date} ${b.item.start}`));
 
     if (!exceptions.length) {
         els.exceptionList.innerHTML = `<div class="empty-state">No busy blocks yet.</div>`;
         return;
     }
 
-    els.exceptionList.innerHTML = exceptions.map((item, index) => `
+    els.exceptionList.innerHTML = exceptions.map(({ item, originalIndex }) => `
         <div class="exception-item">
             <div><strong>${escapeHtml(item.date || "")}</strong> ${escapeHtml(item.start || "")} - ${escapeHtml(item.end || "")}</div>
             <div class="small-note">${escapeHtml(item.note || "Busy")}</div>
             <div class="action-row">
-                <button type="button" class="btn btn--ghost btn--small" data-remove-exception="${index}">Remove</button>
+                <button type="button" class="btn btn--ghost btn--small" data-remove-exception="${originalIndex}">Remove</button>
             </div>
         </div>
     `).join("");
@@ -1792,7 +4481,35 @@ function renderExceptions() {
     });
 }
 
+function removeExpiredExceptions() {
+    const exceptions = Array.isArray(state.bookingSettings.exceptions)
+        ? state.bookingSettings.exceptions
+        : [];
+    const now = Date.now();
+    const timezone = getTeacherTimezone();
+    const active = exceptions.filter((item) => {
+        if (!item?.date || !item?.end) return true;
+        const endMs = getExceptionEndMs(item, timezone);
+        return !Number.isFinite(endMs) || endMs > now;
+    });
+    const removedCount = exceptions.length - active.length;
+    if (removedCount) state.bookingSettings.exceptions = active;
+    return removedCount;
+}
+
 async function saveBookingSettingsPublicMirror() {
+    const publicCourseOffers = {
+        ...(state.bookingSettings.courseOffers || {}),
+        packages: Array.isArray(state.bookingSettings.courseOffers?.packages)
+            ? state.bookingSettings.courseOffers.packages.map((pkg, index) => ({
+                id: String(pkg.id || `pkg-${index + 1}`),
+                lessons: Math.max(1, Number.parseInt(pkg.lessons || "1", 10) || 1),
+                price: Math.max(0.01, Number.parseFloat(pkg.price || "10") || 10),
+                badge: String(pkg.badge || "").slice(0, 60),
+                popular: pkg.popular === true,
+            }))
+            : getRecommendedPackagesForPrice(state.bookingSettings.courseOffers?.courseAccessPrice || 10),
+    };
     await window.db.collection("bookingSettings").doc("primary").set({
         timezone: state.bookingSettings.timezone,
         slotMinutes: state.bookingSettings.slotMinutes,
@@ -1800,6 +4517,7 @@ async function saveBookingSettingsPublicMirror() {
         totalSlotMinutes: state.bookingSettings.totalSlotMinutes,
         days: state.bookingSettings.days,
         exceptions: state.bookingSettings.exceptions,
+        courseOffers: publicCourseOffers,
         updatedAt: Date.now(),
     }, { merge: true });
 }
@@ -1808,6 +4526,7 @@ async function saveContactPublicMirror() {
     await window.db.collection("bookingSettings").doc("primary").set({
         whatsapp: state.contactSettings.whatsapp || "",
         contactEmail: state.contactSettings.email || "",
+        classroomMeetingUrl: state.contactSettings.classroomMeetingUrl || "",
         updatedAt: Date.now(),
     }, { merge: true });
 }
@@ -1819,15 +4538,175 @@ async function saveTeacherSettings() {
     await saveBookingSettingsPublicMirror();
 }
 
+async function saveCourseOffers() {
+    const rawPayPalLink = (els.paypalPaymentLink?.value || "").trim();
+    const paypalPaymentLink = normalizePayPalLink(rawPayPalLink);
+    if (rawPayPalLink && !paypalPaymentLink) {
+        throw new Error("Use a secure https://paypal.com or https://paypal.me payment link.");
+    }
+    state.bookingSettings.courseOffers = {
+        ...state.bookingSettings.courseOffers,
+        courseAccessPrice: toMoneyValue(els.courseAccessPrice?.value || 15),
+        courseAccessUnits: Math.max(1, Number.parseInt(els.courseAccessUnits?.value || "15", 10) || 15),
+        freeTrialLessons: Math.max(0, Number.parseInt(els.freeTrialLessons?.value || "1", 10) || 0),
+        paypalPaymentLink: paypalPaymentLink.slice(0, 500),
+        paypalReminder: (els.paypalReminder?.value || "").trim().slice(0, 500),
+        updatedAt: Date.now(),
+    };
+    await saveTeacherSettings();
+    updateStudentOfferUi();
+    setStatus(els.courseOffersMsg, "Course offers saved.", "success");
+}
+
+function renderTeacherPackagesUi() {
+    if (!els.teacherPackagesContainer) return;
+    const offers = state.bookingSettings.courseOffers || {};
+    const pkgs = offers.packages || [];
+    els.teacherPackagesContainer.innerHTML = "";
+
+    if (pkgs.length === 0) {
+        els.teacherPackagesContainer.innerHTML = `<div class="small-note" style="text-align: center; padding: 10px; color: var(--muted);">No packages defined. Click 'Add New Package' to get started.</div>`;
+        return;
+    }
+
+    pkgs.forEach((p, idx) => {
+        const row = document.createElement("div");
+        row.className = "package-row";
+        row.dataset.id = p.id || `pkg-${idx}-${Date.now()}`;
+        row.style.cssText = "display: flex; gap: 10px; align-items: center; background: var(--bg-soft); padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); margin-bottom: 8px; flex-wrap: wrap;";
+        row.innerHTML = `
+            <div style="flex: 2; min-width: 140px;">
+                <span style="font-size: 0.75rem; color: var(--muted); display: block; margin-bottom: 2px;">Badge / Discount Label</span>
+                <input type="text" class="package-badge-input" value="${escapeHtml(p.badge || "")}" placeholder="e.g. Save 7%" style="width: 100%; padding: 4px 8px; font-size: 0.85rem;" />
+            </div>
+            <div style="flex: 1; min-width: 70px;">
+                <span style="font-size: 0.75rem; color: var(--muted); display: block; margin-bottom: 2px;">Lessons</span>
+                <input type="number" class="package-lessons-input" value="${p.lessons || 1}" min="1" step="1" required style="width: 100%; padding: 4px 8px; font-size: 0.85rem;" />
+            </div>
+            <div style="flex: 1; min-width: 80px;">
+                <span style="font-size: 0.75rem; color: var(--muted); display: block; margin-bottom: 2px;">Price (USD)</span>
+                <input type="number" class="package-price-input" value="${p.price || 15}" min="0.01" step="0.01" required style="width: 100%; padding: 4px 8px; font-size: 0.85rem;" />
+            </div>
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 50px; min-width: 50px;">
+                <span style="font-size: 0.75rem; color: var(--muted); display: block; margin-bottom: 2px; text-align: center;">Popular</span>
+                <input type="radio" name="popular_package" class="package-popular-input" ${p.popular ? "checked" : ""} style="cursor: pointer; transform: scale(1.1);" />
+            </div>
+            <div style="margin-top: 15px;">
+                <button type="button" class="btn btn--danger package-delete-btn" style="padding: 4px 8px; font-size: 0.8rem; background: #ef4444; color: #fff; border: none; border-radius: 4px; cursor: pointer;">Delete</button>
+            </div>
+        `;
+
+        row.querySelector(".package-delete-btn")?.addEventListener("click", () => {
+            row.remove();
+        });
+
+        els.teacherPackagesContainer.appendChild(row);
+    });
+}
+
+function getRecommendedPackagesForPrice(price = 10) {
+    const lessonPrice = Math.max(1, toMoneyValue(price) || 10);
+    return [
+        { id: "pkg-1", lessons: 1, price: lessonPrice, badge: "Single Lesson", popular: false },
+        { id: "pkg-5", lessons: 5, price: Math.round(lessonPrice * 5 * 0.96), badge: "Starter Pack", popular: false },
+        { id: "pkg-10", lessons: 10, price: Math.round(lessonPrice * 10 * 0.9), badge: "POPULAR", popular: true },
+        { id: "pkg-20", lessons: 20, price: Math.round(lessonPrice * 20 * 0.85), badge: "Best Value", popular: false },
+    ];
+}
+
+function gatherPackagesFromUi() {
+    if (!els.teacherPackagesContainer) return [];
+    const rows = els.teacherPackagesContainer.querySelectorAll(".package-row");
+    const pkgs = [];
+    rows.forEach(row => {
+        const id = row.dataset.id;
+        const badgeInput = row.querySelector(".package-badge-input");
+        const lessonsInput = row.querySelector(".package-lessons-input");
+        const priceInput = row.querySelector(".package-price-input");
+        const popularInput = row.querySelector(".package-popular-input");
+
+        const badge = (badgeInput?.value || "").trim();
+        const lessons = Math.max(1, Number.parseInt(lessonsInput?.value || "1", 10) || 1);
+        const price = Math.max(0.01, Number.parseFloat(priceInput?.value || "15") || 15);
+        const popular = popularInput ? popularInput.checked : false;
+
+        pkgs.push({ id, badge, lessons, price, popular });
+    });
+    return pkgs;
+}
+
+async function saveTeacherPackages() {
+    const basePrice = state.bookingSettings.courseOffers?.courseAccessPrice || els.courseAccessPrice?.value || 10;
+    const gatheredPackages = gatherPackagesFromUi();
+    const pkgs = gatheredPackages.length
+        ? gatheredPackages
+        : getRecommendedPackagesForPrice(basePrice);
+    if (pkgs.length > 0) {
+        const popularCount = pkgs.filter(p => p.popular).length;
+        if (popularCount === 0) {
+            pkgs[0].popular = true;
+        } else if (popularCount > 1) {
+            let found = false;
+            pkgs.forEach(p => {
+                if (p.popular) {
+                    if (!found) found = true;
+                    else p.popular = false;
+                }
+            });
+        }
+    }
+    state.bookingSettings.courseOffers.packages = pkgs;
+    await saveTeacherSettings();
+    await loadPublicSettings({ force: true });
+    updateStudentOfferUi();
+    renderTeacherPackagesUi();
+}
+
 async function saveTeacherContactSettings() {
     await saveContactSettingsToCloud(window.db, window.firebase, state.contactSettings);
     await saveContactPublicMirror();
+}
+
+let publicBookingPrivacyMigrationDone = false;
+
+async function removePrivateFieldsFromPublicBookings() {
+    if (publicBookingPrivacyMigrationDone || !state.teacherUser || state.teacherRole !== "teacher") return;
+    const documentId = window.firebase.firestore.FieldPath.documentId();
+    const deleteField = window.firebase.firestore.FieldValue.delete();
+    let lastDoc = null;
+    do {
+        let query = window.db.collection("publicBookings").orderBy(documentId).limit(300);
+        if (lastDoc) query = query.startAfter(lastDoc);
+        const snapshot = await query.get();
+        if (snapshot.empty) break;
+        const batch = window.db.batch();
+        let changedCount = 0;
+        snapshot.docs.forEach((doc) => {
+            const data = doc.data() || {};
+            if (!Object.prototype.hasOwnProperty.call(data, "emailHash") &&
+                !Object.prototype.hasOwnProperty.call(data, "studentUid")) {
+                return;
+            }
+            batch.update(doc.ref, {
+                emailHash: deleteField,
+                studentUid: deleteField,
+            });
+            changedCount += 1;
+        });
+        if (changedCount) await batch.commit();
+        lastDoc = snapshot.docs[snapshot.docs.length - 1];
+        if (snapshot.size < 300) break;
+    } while (lastDoc);
+    publicBookingPrivacyMigrationDone = true;
 }
 
 async function refreshTeacherDashboard() {
     if (!state.teacherUser || state.teacherRole !== "teacher") return;
     const teacherSnap = await window.db.collection("teachers").doc(state.teacherUser.uid).get();
     const teacherData = teacherSnap.exists ? (teacherSnap.data() || {}) : {};
+    state.teacherRevenueTotal = Number.isFinite(Number(teacherData.revenueTotal))
+        ? Number(teacherData.revenueTotal)
+        : 0;
     state.bookingSettings = ensureBookingSettingsShape({
         ...getDefaultBookingSettings(getTeacherTimezone()),
         ...(teacherData.bookingSettings || {}),
@@ -1837,18 +4716,533 @@ async function refreshTeacherDashboard() {
         ...(teacherData.contactSettings || {}),
     };
     window.bookingSettings = state.bookingSettings;
+    if (removeExpiredExceptions() > 0) {
+        await saveTeacherSettings();
+    }
     await refreshRuntimeBusyBlocks();
     syncTeacherFormFields();
-    const balanceResult = await reconcileStudentBalances();
-    if (balanceResult.chargedCount && els.teacherStudentsMsg) {
-        setStatus(els.teacherStudentsMsg, `Deducted ${balanceResult.chargedCount} due lesson charge${balanceResult.chargedCount === 1 ? "" : "s"}.`, "success");
-    } else if (balanceResult.missingPriceCount && els.teacherStudentsMsg) {
-        setStatus(els.teacherStudentsMsg, "Some due lessons were not deducted because lesson price is not set.", "error");
-    }
     await refreshTeacherStudents();
     await refreshTeacherBookings();
+    await refreshTeacherLessonFeedback();
     await refreshGoogleCalendarStatus();
     await renderBookingCalendar();
+    updateTeacherOverviewStats();
+}
+
+function switchTeacherTab(tabId) {
+    if (!tabId) return;
+    const teacherDash = document.getElementById("teacherDashboard");
+    if (!teacherDash) return;
+
+    const tabBtns = teacherDash.querySelectorAll(".teacher-nav-tabs .teacher-tab-btn");
+    const tabPanels = teacherDash.querySelectorAll(".teacher-tab-content");
+
+    tabBtns.forEach((btn) => {
+        const isActive = btn.dataset.teacherTab === tabId;
+        btn.classList.toggle("is-active", isActive);
+        btn.setAttribute("aria-selected", isActive ? "true" : "false");
+    });
+
+    tabPanels.forEach((panel) => {
+        const isActive = panel.id === tabId;
+        panel.classList.toggle("is-active", isActive);
+        if (isActive) {
+            panel.removeAttribute("hidden");
+        } else {
+            panel.setAttribute("hidden", "hidden");
+        }
+    });
+
+    state.activeTeacherTab = tabId;
+    if (tabId === "tab-schedule") {
+        renderTeacherWeekCalendar();
+    }
+}
+
+let teacherUpcomingBannerInterval = null;
+
+function renderTeacherUpcomingLessonBanner() {
+    const bannerEl = document.getElementById("teacherUpcomingLessonBanner");
+    if (!bannerEl) return;
+
+    if (teacherUpcomingBannerInterval) {
+        clearInterval(teacherUpcomingBannerInterval);
+        teacherUpcomingBannerInterval = null;
+    }
+
+    const bookings = state.bookingCache instanceof Map
+        ? Array.from(state.bookingCache.values())
+        : (Array.isArray(state.bookingCache) ? state.bookingCache : []);
+
+    if (!bookings || !bookings.length) {
+        bannerEl.style.display = "none";
+        bannerEl.innerHTML = "";
+        return;
+    }
+
+    const now = Date.now();
+    const cutoffMs = 12 * 60 * 60 * 1000; // 12 hours window
+
+    const activeAndFuture = bookings.filter((b) => {
+        const status = (b.status || "").toLowerCase();
+        if (status === "canceled" || status === "completed") return false;
+
+        const slotStart = Number(b.slot || b.timeSlot || 0);
+        if (!slotStart) return false;
+        const slotEnd = slotStart + 50 * 60 * 1000; // 50 mins duration
+        const accessState = getLessonAccessState(slotStart, now);
+
+        // Show if active now or starting in less than 12 hours
+        if (now >= slotStart && accessState.canEnter) return true;
+        if (slotStart > now && (slotStart - now) <= cutoffMs) return true;
+
+        return false;
+    });
+
+    if (!activeAndFuture.length) {
+        bannerEl.style.display = "none";
+        bannerEl.innerHTML = "";
+        return;
+    }
+
+    // Sort ascending to get the earliest upcoming booking
+    activeAndFuture.sort((a, b) => Number(a.slot || a.timeSlot || 0) - Number(b.slot || b.timeSlot || 0));
+    const nextBooking = activeAndFuture[0];
+    const slotStart = Number(nextBooking.slot || nextBooking.timeSlot);
+    const slotEnd = slotStart + 50 * 60 * 1000;
+
+    bannerEl.style.display = "block";
+
+    const updateBannerContent = () => {
+        const currentNow = Date.now();
+        const isLive = currentNow >= slotStart && currentNow < slotEnd;
+        const accessState = getLessonAccessState(slotStart, currentNow);
+        let countdownText = "";
+        let pulseClass = "";
+
+        const timezone = getTeacherTimezone();
+        const dateStr = new Date(slotStart).toLocaleDateString("en-US", {
+            weekday: "long",
+            month: "short",
+            day: "numeric",
+            timeZone: timezone
+        });
+        const startTimeStr = new Date(slotStart).toLocaleTimeString("en-US", {
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+            timeZone: timezone
+        });
+        const endTimeStr = new Date(slotEnd).toLocaleTimeString("en-US", {
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+            timeZone: timezone
+        });
+        const fullTimeStr = `${startTimeStr} – ${endTimeStr}`;
+
+        const studentName = nextBooking.name || nextBooking.studentName || "Student";
+        const studentInitial = (studentName.trim()[0] || "S").toUpperCase();
+        const studentEmail = nextBooking.email || nextBooking.studentEmail || "";
+
+        if (isLive) {
+            const minsActive = Math.floor((currentNow - slotStart) / 60000);
+            countdownText = `🔴 Arabic Lesson with ${escapeHtml(studentName)} is LIVE NOW! Started ${minsActive} min${minsActive === 1 ? "" : "s"} ago.`;
+            pulseClass = "pulse-active";
+        } else {
+            countdownText = `Upcoming lesson with ${escapeHtml(studentName)}: ${getUpcomingRelativeTime(slotStart)}`;
+            const timeToStart = slotStart - currentNow;
+            if (timeToStart <= 15 * 60 * 1000) {
+                pulseClass = "pulse-active";
+            }
+        }
+
+        bannerEl.innerHTML = `
+            <div class="upcoming-banner-card" style="border: 2px solid var(--primary); background: linear-gradient(135deg, #ffffff, #f0fdf4);">
+                <div class="upcoming-banner-main" style="display: flex; flex-direction: column; gap: 8px;">
+                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 4px;">
+                        <div style="width: 46px; height: 46px; background: var(--primary); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.3rem; border-radius: var(--radius-sm); flex-shrink: 0; box-shadow: 0 4px 12px rgba(15,118,110,0.22);">
+                            ${escapeHtml(studentInitial)}
+                        </div>
+                        <div>
+                            <div style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; color: #b91c1c; background: #fef2f2; border: 1px solid #fee2e2; padding: 2px 8px; border-radius: 6px; display: inline-block; margin-bottom: 4px;">
+                                ⏰ Next Lesson Notice (Within 12 Hours)
+                            </div>
+                            <div style="font-weight: 800; font-size: 1.2rem; color: var(--ink); line-height: 1.2;">
+                                Student: ${escapeHtml(studentName)} ${studentEmail ? `<span style="font-size: 0.85rem; font-weight: 500; color: var(--muted);">(${escapeHtml(studentEmail)})</span>` : ""}
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="upcoming-banner-time" style="font-size: 1.12rem; font-weight: 800; color: var(--ink);">${escapeHtml(fullTimeStr)}</div>
+                        <div style="font-size: 0.82rem; color: var(--primary); font-weight: 700; margin-top: -2px; text-transform: uppercase; letter-spacing: 0.4px;">${escapeHtml(dateStr)}</div>
+                        <div style="font-size: 0.76rem; color: var(--muted); font-weight: 700; margin-top: 2px;">Timezone: ${escapeHtml(timezone)} (${escapeHtml(formatTimezoneGmt(timezone))})</div>
+                        <div class="upcoming-banner-countdown" style="margin: 6px 0 12px 0; font-size: 0.92rem; font-weight: 700; color: var(--muted); display: flex; align-items: center; gap: 6px;">
+                            <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: ${isLive ? '#ef4444' : 'var(--primary)'};"></span>
+                            ${countdownText}
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                        <button class="btn upcoming-banner-btn ${pulseClass}" id="teacherBannerJoinBtn" ${accessState.canEnter ? "" : "disabled"} aria-disabled="${accessState.canEnter ? "false" : "true"}">
+                            🎓 ${getLessonEntryLabel(accessState)}
+                        </button>
+                    </div>
+                </div>
+                <!-- Custom Clock Illustration -->
+                <svg width="125" height="125" viewBox="0 0 130 130" fill="none" xmlns="http://www.w3.org/2000/svg" style="align-self: flex-end; margin-left: auto; flex-shrink: 0;">
+                    <rect x="25" y="80" width="85" height="40" rx="8" fill="#F59E0B" stroke="var(--ink)" stroke-width="2.5" />
+                    <rect x="35" y="105" width="30" height="8" rx="2" fill="#D97706" />
+                    <circle cx="80" cy="100" r="6" fill="#0F766E" stroke="var(--ink)" stroke-width="2" />
+                    <circle cx="95" cy="100" r="6" fill="#0F766E" stroke="var(--ink)" stroke-width="2" />
+                    <rect x="35" y="55" width="60" height="30" rx="6" fill="#C2410C" stroke="var(--ink)" stroke-width="2.5" />
+                    <rect x="42" y="60" width="46" height="20" rx="3" fill="#FFFDF9" stroke="var(--ink)" stroke-width="2" />
+                    <path d="M65 70 L75 70" stroke="var(--ink)" stroke-width="2.5" stroke-linecap="round" />
+                    <path d="M65 70 L65 63" stroke="#C2410C" stroke-width="2" stroke-linecap="round" />
+                    <circle cx="65" cy="70" r="2.5" fill="var(--ink)" />
+                    <line x1="45" y1="52" x2="40" y2="58" stroke="var(--ink)" stroke-width="3" stroke-linecap="round" />
+                    <line x1="85" y1="52" x2="90" y2="58" stroke="var(--ink)" stroke-width="3" stroke-linecap="round" />
+                    <circle cx="45" cy="18" r="7" fill="#5F6875" stroke="var(--ink)" stroke-width="2" />
+                    <path d="M42 22 L48 28" stroke="var(--ink)" stroke-width="3" />
+                    <circle cx="85" cy="18" r="7" fill="#5F6875" stroke="var(--ink)" stroke-width="2" />
+                    <path d="M88 22 L82 28" stroke="var(--ink)" stroke-width="3" />
+                    <path d="M55 12 H75" stroke="var(--ink)" stroke-width="3" stroke-linecap="round" />
+                    <circle cx="65" cy="35" r="20" fill="#0F766E" stroke="var(--ink)" stroke-width="2.5" />
+                    <circle cx="65" cy="35" r="15" fill="#FFFDF9" stroke="var(--ink)" stroke-width="2" />
+                    <path d="M65 35 L73 38" stroke="var(--ink)" stroke-width="2" stroke-linecap="round" />
+                    <path d="M65 35 L60 28" stroke="var(--ink)" stroke-width="2" stroke-linecap="round" />
+                    <circle cx="65" cy="35" r="2" fill="var(--ink)" />
+                </svg>
+            </div>
+        `;
+
+        const btn = bannerEl.querySelector("#teacherBannerJoinBtn");
+        if (accessState.canEnter) {
+            btn?.addEventListener("click", () => {
+                openClassroomDirectly(nextBooking);
+            });
+        }
+    };
+
+    updateBannerContent();
+    teacherUpcomingBannerInterval = setInterval(updateBannerContent, 30000);
+}
+
+function updateTeacherOverviewStats() {
+    const teacherNameEl = document.getElementById("dashTeacherName");
+    const activeStudentsEl = document.getElementById("dashActiveStudentsVal");
+    const upcomingBookingsEl = document.getElementById("dashUpcomingBookingsVal");
+    const hoursTaughtEl = document.getElementById("dashHoursTaughtVal");
+    const ratingEl = document.getElementById("dashRatingVal");
+
+    if (teacherNameEl) {
+        teacherNameEl.textContent = state.profileSettings?.teacherName || state.teacherUser?.displayName || "Jaffer";
+    }
+
+    const bookingsList = state.bookingCache instanceof Map
+        ? Array.from(state.bookingCache.values())
+        : (Array.isArray(state.bookingCache) ? state.bookingCache : []);
+
+    const now = Date.now();
+
+    // 1. Calculate Active Students dynamically
+    if (activeStudentsEl) {
+        let baseStudents = 85;
+        const baseStr = state.profileSettings?.activeStudentsCount || state.profileSettings?.studentsCount || "85+";
+        const parsedBase = parseInt(String(baseStr).replace(/[^0-9]/g, ""), 10);
+        if (!isNaN(parsedBase)) {
+            baseStudents = parsedBase;
+        }
+
+        const registeredCount = Array.isArray(state.studentsCache) ? state.studentsCache.length : 0;
+
+        // Find unique student emails/uids in bookings
+        const bookingStudentKeys = new Set();
+        bookingsList.forEach(b => {
+            const status = (b.status || "").toLowerCase();
+            if (status !== "canceled") {
+                const key = b.studentUid || b.email || b.studentEmail || b.name;
+                if (key) bookingStudentKeys.add(key);
+            }
+        });
+
+        const dynamicTotal = Math.max(registeredCount, baseStudents, bookingStudentKeys.size);
+        activeStudentsEl.textContent = `${dynamicTotal.toLocaleString()}+`;
+    }
+
+    // 2. Calculate Upcoming Bookings
+    if (upcomingBookingsEl) {
+        const upcomingCount = bookingsList.filter(b => (b.status || "confirmed") !== "canceled" && (Number(b.slot || b.timeSlot || 0) >= now)).length;
+        upcomingBookingsEl.textContent = upcomingCount;
+    }
+
+    if (hoursTaughtEl) {
+        const baseStr = state.profileSettings?.hoursTaught || "1,200+";
+        const parsedBase = parseInt(String(baseStr).replace(/[^0-9]/g, ""), 10);
+        const totalLessons = Number.isFinite(parsedBase) ? parsedBase : 1200;
+        hoursTaughtEl.textContent = `${totalLessons.toLocaleString()}+`;
+    }
+
+    // 4. Calculate Average Rating
+    if (ratingEl) {
+        if (Array.isArray(state.reviews) && state.reviews.length > 0) {
+            const sum = state.reviews.reduce((acc, r) => acc + (Number(r.rating) || 5), 0);
+            const avg = (sum / state.reviews.length).toFixed(1);
+            ratingEl.textContent = avg;
+        } else {
+            ratingEl.textContent = "5.0";
+        }
+    }
+
+    // 5. Show cumulative payments received, independent from remaining lesson credit.
+    const dashTotalBalanceEl = document.getElementById("dashTotalStudentBalanceVal");
+    const headTotalBalanceEl = document.getElementById("teacherTotalStudentBalanceHead");
+    const headTotalStudentsEl = document.getElementById("teacherTotalStudentsCount");
+
+    const studentList = Array.isArray(state.studentsCache) && state.studentsCache.length > 0
+        ? state.studentsCache
+        : Array.from(state.studentCache.values());
+
+    const formattedTotalBalance = formatMoney(Number(state.teacherRevenueTotal ?? 0));
+
+    if (dashTotalBalanceEl) {
+        dashTotalBalanceEl.textContent = formattedTotalBalance;
+    }
+    if (headTotalBalanceEl) {
+        headTotalBalanceEl.textContent = formattedTotalBalance;
+    }
+    if (headTotalStudentsEl) {
+        headTotalStudentsEl.textContent = String(studentList.length || 0);
+    }
+
+    renderTeacherUpcomingLessonBanner();
+    updateSystemSyncStatusIndicator();
+}
+
+function parseProfileCounter(value, fallback = 0) {
+    const parsed = Number.parseInt(String(value || "").replace(/[^\d]/g, ""), 10);
+    return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function renderPreplyStatisticsSummary(statistics = {}) {
+    if (!els.preplyStatsSummary) return;
+    const initialized = statistics.initialized === true;
+    els.preplyStatsSummary.hidden = false;
+    els.preplyStatsSummary.innerHTML = initialized
+        ? `
+            <strong>Preply automatic statistics active</strong>
+            <span>${Number(statistics.processedEventIds?.length || 0)} completed calendar lessons tracked</span>
+            <span>${Number(statistics.knownStudentKeys?.length || 0)} unique calendar students recognized</span>
+            <span>${Number(statistics.processedPlatformBookingIds?.length || 0)} completed platform lessons tracked</span>
+            <span>${Number(statistics.knownPlatformStudentKeys?.length || 0)} unique platform students recognized</span>
+            <small>Last sync: ${statistics.lastSyncedAt ? escapeHtml(new Date(statistics.lastSyncedAt).toLocaleString()) : "Not synced yet"}</small>
+        `
+        : `
+            <strong>Preply statistics are not initialized</strong>
+            <span>The first sync records existing events as the baseline without increasing your public totals.</span>
+        `;
+}
+
+async function syncPreplyStatistics() {
+    if (!state.teacherUser || state.teacherRole !== "teacher") {
+        throw new Error("Teacher login is required.");
+    }
+    const result = await window.getPreplyStatisticsViaAppsScript?.({ days: 730 });
+    if (!result?.success) {
+        throw new Error(result?.message || "Could not load Preply calendar statistics.");
+    }
+    const teacherRef = window.db.collection("teachers").doc(state.teacherUser.uid);
+    const teacherSnap = await teacherRef.get();
+    const teacherData = teacherSnap.exists ? (teacherSnap.data() || {}) : {};
+    const previous = teacherData.calendarStatistics || {};
+    const currentEventIds = Array.isArray(result.eventIds) ? result.eventIds.map(String) : [];
+    const currentStudentKeys = Array.isArray(result.studentKeys) ? result.studentKeys.map(String) : [];
+    const existingEventIds = new Set(Array.isArray(previous.processedEventIds) ? previous.processedEventIds.map(String) : []);
+    const existingStudentKeys = new Set(Array.isArray(previous.knownStudentKeys) ? previous.knownStudentKeys.map(String) : []);
+    const firstSync = previous.initialized !== true;
+    const newEventIds = firstSync ? [] : currentEventIds.filter((eventId) => !existingEventIds.has(eventId));
+    const newStudentKeys = firstSync ? [] : currentStudentKeys.filter((studentKey) => !existingStudentKeys.has(studentKey));
+    const currentLessons = parseProfileCounter(state.profileSettings?.hoursTaught, 1200);
+    const currentStudents = parseProfileCounter(state.profileSettings?.studentsCount, 85);
+    const now = Date.now();
+    const calendarStatistics = {
+        initialized: true,
+        processedEventIds: Array.from(new Set([...existingEventIds, ...currentEventIds])).slice(-5000),
+        knownStudentKeys: Array.from(new Set([...existingStudentKeys, ...currentStudentKeys])).slice(-5000),
+        baselineLessons: Number(previous.baselineLessons || currentLessons),
+        baselineStudents: Number(previous.baselineStudents || currentStudents),
+        lessonsAdded: Number(previous.lessonsAdded || 0) + newEventIds.length,
+        studentsAdded: Number(previous.studentsAdded || 0) + newStudentKeys.length,
+        lastCalendarLessonCount: Number(result.completedLessons || 0),
+        lastCalendarStudentCount: Number(result.uniqueStudents || 0),
+        lastSyncedAt: now,
+    };
+    await teacherRef.set({
+        calendarStatistics,
+        updatedAt: now,
+    }, { merge: true });
+    if (!firstSync && (newEventIds.length || newStudentKeys.length)) {
+        state.profileSettings = {
+            ...state.profileSettings,
+            hoursTaught: `${currentLessons + newEventIds.length}+`,
+            studentsCount: `${currentStudents + newStudentKeys.length}+`,
+            calendarStatsUpdatedAt: now,
+        };
+        await saveCloudProfileSettings(window.db, state.profileSettings);
+        saveLocalProfileSettings("teacher_profile_v1", state.profileSettings);
+        renderProfileUi();
+        updateTeacherOverviewStats();
+    }
+    renderPreplyStatisticsSummary(calendarStatistics);
+    return {
+        firstSync,
+        newLessons: newEventIds.length,
+        newStudents: newStudentKeys.length,
+    };
+}
+
+async function syncPlatformStatistics() {
+    if (!state.teacherUser || state.teacherRole !== "teacher" || !window.db) return null;
+    const bookings = state.bookingCache instanceof Map
+        ? Array.from(state.bookingCache.entries()).map(([id, booking]) => ({ id, ...(booking || {}) }))
+        : [];
+    const now = Date.now();
+    const completed = bookings.filter((booking) => {
+        const status = String(booking.status || "booked").toLowerCase();
+        const slot = Number(booking.slot || booking.timeSlot || 0);
+        const durationMinutes = Number(booking.durationMinutes || booking.slotMinutes || 50);
+        return booking.id && status !== "canceled" && slot > 0 && slot + durationMinutes * 60000 <= now;
+    });
+    const completedIds = completed.map((booking) => String(booking.id));
+    const studentKeys = Array.from(new Set(completed.map((booking) => String(
+        booking.studentUid || booking.email || booking.studentEmail || booking.name || ""
+    ).trim().toLowerCase()).filter(Boolean)));
+
+    const teacherRef = window.db.collection("teachers").doc(state.teacherUser.uid);
+    const teacherSnap = await teacherRef.get();
+    const teacherData = teacherSnap.exists ? (teacherSnap.data() || {}) : {};
+    const previous = teacherData.calendarStatistics || {};
+    const platformInitialized = previous.platformInitialized === true;
+    const knownLessonIds = new Set(Array.isArray(previous.processedPlatformBookingIds)
+        ? previous.processedPlatformBookingIds.map(String)
+        : []);
+    const knownStudentKeys = new Set(Array.isArray(previous.knownPlatformStudentKeys)
+        ? previous.knownPlatformStudentKeys.map(String)
+        : []);
+    const newLessonIds = platformInitialized
+        ? completedIds.filter((id) => !knownLessonIds.has(id))
+        : [];
+    const newStudentKeys = platformInitialized
+        ? studentKeys.filter((key) => !knownStudentKeys.has(key))
+        : [];
+    const nextLessonIds = Array.from(new Set([...knownLessonIds, ...completedIds])).slice(-5000);
+    const nextStudentKeys = Array.from(new Set([...knownStudentKeys, ...studentKeys])).slice(-5000);
+    const unchanged = platformInitialized && !newLessonIds.length && !newStudentKeys.length &&
+        nextLessonIds.length === knownLessonIds.size && nextStudentKeys.length === knownStudentKeys.size;
+    if (unchanged) return { firstSync: false, newLessons: 0, newStudents: 0 };
+
+    const syncedAt = Date.now();
+    const calendarStatistics = {
+        ...previous,
+        platformInitialized: true,
+        processedPlatformBookingIds: nextLessonIds,
+        knownPlatformStudentKeys: nextStudentKeys,
+        platformLessonsAdded: Number(previous.platformLessonsAdded || 0) + newLessonIds.length,
+        platformStudentsAdded: Number(previous.platformStudentsAdded || 0) + newStudentKeys.length,
+        lastPlatformLessonCount: completedIds.length,
+        lastPlatformStudentCount: studentKeys.length,
+        lastPlatformSyncedAt: syncedAt,
+    };
+    await teacherRef.set({ calendarStatistics, updatedAt: syncedAt }, { merge: true });
+
+    if (newLessonIds.length || newStudentKeys.length) {
+        const currentLessons = parseProfileCounter(state.profileSettings?.hoursTaught, 1200);
+        const currentStudents = parseProfileCounter(state.profileSettings?.studentsCount, 85);
+        state.profileSettings = {
+            ...state.profileSettings,
+            hoursTaught: `${currentLessons + newLessonIds.length}+`,
+            studentsCount: `${currentStudents + newStudentKeys.length}+`,
+            platformStatsUpdatedAt: syncedAt,
+        };
+        await saveCloudProfileSettings(window.db, state.profileSettings);
+        saveLocalProfileSettings("teacher_profile_v1", state.profileSettings);
+        renderProfileUi();
+        updateTeacherOverviewStats();
+    }
+    renderPreplyStatisticsSummary(calendarStatistics);
+    return {
+        firstSync: !platformInitialized,
+        newLessons: newLessonIds.length,
+        newStudents: newStudentKeys.length,
+    };
+}
+
+function updateSystemSyncStatusIndicator() {
+    const badgeEl = document.getElementById("teacherSystemStatusBadge");
+    const dotEl = document.getElementById("teacherStatusDot");
+    const textEl = document.getElementById("teacherStatusText");
+    if (!badgeEl || !textEl || !dotEl) return;
+
+    const isOnline = typeof navigator !== "undefined" && navigator.onLine !== false;
+    const isDbConnected = !!window.db;
+    const isAppsScriptSyncOk = state.busySyncReady === true;
+    const isGoogleCalendarConnected = state.googleCalendarConnected === true;
+    const isCalendarSyncOk = isAppsScriptSyncOk || isGoogleCalendarConnected;
+
+    if (!isOnline || !isDbConnected) {
+        badgeEl.style.background = "#fef2f2";
+        badgeEl.style.color = "#b91c1c";
+        badgeEl.style.borderColor = "#fecaca";
+        dotEl.style.background = "#ef4444";
+        dotEl.style.boxShadow = "0 0 0 2px rgba(239, 68, 68, 0.25)";
+        textEl.textContent = !isOnline ? "🔴 Internet Offline" : "🔴 Backend Connection Down";
+        badgeEl.title = "Backend database or network is unreachable. Click to re-test connection.";
+        return;
+    }
+
+    if (!isCalendarSyncOk) {
+        badgeEl.style.background = "#fef3c7";
+        badgeEl.style.color = "#b45309";
+        badgeEl.style.borderColor = "#fde68a";
+        dotEl.style.background = "#f59e0b";
+        dotEl.style.boxShadow = "0 0 0 2px rgba(245, 158, 11, 0.25)";
+        textEl.textContent = "⚠️ Google Calendar Sync Down";
+        badgeEl.title = `Google Calendar sync issue: ${state.busySyncMessage || "Could not reach Google Calendar."}. Click to test & sync now.`;
+        return;
+    }
+
+    badgeEl.style.background = "#e6f4ea";
+    badgeEl.style.color = "#137333";
+    badgeEl.style.borderColor = "#ceead6";
+    dotEl.style.background = "#34a853";
+    dotEl.style.boxShadow = "0 0 0 2px rgba(52, 168, 83, 0.25)";
+    textEl.textContent = isAppsScriptSyncOk
+        ? "🟢 System & Calendar Sync Online"
+        : "🟢 Google Calendar Connected";
+    badgeEl.title = isAppsScriptSyncOk
+        ? "Backend database and calendar availability sync are connected and active. Click to refresh status."
+        : "Google Calendar is connected. Apps Script availability sync is optional and currently unavailable.";
+}
+
+if (typeof window !== "undefined") {
+    window.addEventListener("online", updateSystemSyncStatusIndicator);
+    window.addEventListener("offline", updateSystemSyncStatusIndicator);
+
+    document.addEventListener("DOMContentLoaded", () => {
+        document.getElementById("teacherSystemStatusBadge")?.addEventListener("click", async () => {
+            const textEl = document.getElementById("teacherStatusText");
+            const dotEl = document.getElementById("teacherStatusDot");
+            if (textEl && dotEl) {
+                textEl.textContent = "🔄 Checking Connection & Sync...";
+                dotEl.style.background = "#3b82f6";
+            }
+            try {
+                await refreshRuntimeBusyBlocks({ force: true });
+            } catch (err) {
+                console.error("Manual sync check failed:", err);
+            }
+            updateSystemSyncStatusIndicator();
+        });
+    });
 }
 
 async function refreshTeacherBookings() {
@@ -1856,6 +5250,8 @@ async function refreshTeacherBookings() {
     if (balanceResult.chargedCount && els.teacherStudentsMsg) {
         setStatus(els.teacherStudentsMsg, `Deducted ${balanceResult.chargedCount} due lesson charge${balanceResult.chargedCount === 1 ? "" : "s"}.`, "success");
         await refreshTeacherStudents();
+    } else if (balanceResult.missingPriceCount && els.teacherStudentsMsg) {
+        setStatus(els.teacherStudentsMsg, "Some due lessons were not deducted because lesson price is not set.", "error");
     }
     state.bookingCache = await renderTeacherBookings({
         db: window.db,
@@ -1864,27 +5260,655 @@ async function refreshTeacherBookings() {
         escapeHtml,
         formatSlotTime,
     });
+    await syncPlatformStatistics().catch((error) => {
+        console.warn("Automatic platform statistics sync failed.", error);
+    });
+    renderTeacherWeekCalendar();
+}
+
+function renderTeacherWeekCalendar() {
+    const grid = document.getElementById("teacherCalendarGrid");
+    const rangeLabel = document.getElementById("teacherCalendarRange");
+    if (!grid) return;
+
+    const timezone = state.bookingSettings?.timezone || getTeacherTimezone();
+    const calendarView = state.teacherCalendarView || "week";
+    const periodOffset = Number(state.teacherCalendarWeekOffset || 0);
+    const baseDateKey = calendarView === "day"
+        ? addDaysToDateKey(getDateKey(new Date(), timezone), periodOffset)
+        : getScheduleStartDateKey(periodOffset, timezone);
+    const dayCount = calendarView === "day" ? 1 : 7;
+    const dayKeys = Array.from({ length: dayCount }, (_, index) => addDaysToDateKey(baseDateKey, index));
+    const todayKey = getDateKey(new Date(), timezone);
+    const startHour = 8;
+    const endHour = 23;
+    const pixelsPerMinute = 1;
+    const calendarHeight = (endHour - startHour) * 60 * pixelsPerMinute;
+    const bookings = state.bookingCache instanceof Map
+        ? Array.from(state.bookingCache.values())
+        : (Array.isArray(state.bookingCache) ? state.bookingCache : []);
+    const eventsByDay = new Map(dayKeys.map((key) => [key, []]));
+    const bookingIntervals = [];
+
+    bookings.forEach((booking) => {
+        const status = String(booking?.status || "booked").toLowerCase();
+        const slot = Number(booking?.slot || 0);
+        if (!slot || status === "canceled") return;
+        const dateKey = getDateKey(new Date(slot), timezone);
+        if (!eventsByDay.has(dateKey)) return;
+        const durationMinutes = Number(booking.durationMinutes || booking.slotMinutes || state.bookingSettings?.slotMinutes || 50);
+        bookingIntervals.push({
+            startMs: slot,
+            endMs: slot + durationMinutes * 60000,
+        });
+        eventsByDay.get(dateKey).push({
+            id: booking.id || "",
+            startMs: slot,
+            durationMinutes,
+            label: booking.name || booking.studentName || booking.email || "Student lesson",
+            type: booking.isFreeTrial ? "trial" : "confirmed",
+            studentTimezone: booking.studentTimeZone || "",
+        });
+    });
+
+    const busyBlocks = [
+        ...(Array.isArray(state.bookingSettings?.exceptions) ? state.bookingSettings.exceptions : []),
+        ...(Array.isArray(state.runtimeBusyBlocks) ? state.runtimeBusyBlocks : []),
+    ];
+    busyBlocks.forEach((block) => {
+        if (!block) return;
+        let startMs = Number(block.startMs || 0);
+        let endMs = Number(block.endMs || 0);
+        if ((!startMs || !endMs) && block.date && block.start && block.end) {
+            const [year, month, day] = String(block.date).split("-").map(Number);
+            const startMinutes = String(block.start).split(":").map(Number);
+            const endMinutes = String(block.end).split(":").map(Number);
+            startMs = zonedDateTimeToUtcMs(timezone, year, month, day, startMinutes[0], startMinutes[1]);
+            endMs = zonedDateTimeToUtcMs(timezone, year, month, day, endMinutes[0], endMinutes[1]);
+            if (endMs <= startMs) endMs += 24 * 60 * 60 * 1000;
+        }
+        if (!startMs || !endMs || endMs <= startMs) return;
+        const duplicatesBooking = bookingIntervals.some((booking) => (
+            Math.abs(booking.startMs - startMs) < 2 * 60 * 1000
+            || (startMs < booking.endMs && endMs > booking.startMs)
+        ));
+        if (duplicatesBooking) return;
+        const dateKey = getDateKey(new Date(startMs), timezone);
+        if (!eventsByDay.has(dateKey)) return;
+        eventsByDay.get(dateKey).push({
+            startMs,
+            durationMinutes: Math.max(15, Math.round((endMs - startMs) / 60000)),
+            label: block.note || block.summary || "Busy",
+            type: "busy",
+        });
+    });
+
+    const firstDate = new Date(zonedDateTimeToUtcMs(
+        timezone,
+        ...baseDateKey.split("-").map(Number),
+        12,
+        0
+    ));
+    const lastKey = dayKeys[dayKeys.length - 1];
+    const lastDate = new Date(zonedDateTimeToUtcMs(
+        timezone,
+        ...lastKey.split("-").map(Number),
+        12,
+        0
+    ));
+    if (rangeLabel) {
+        const startLabel = firstDate.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: timezone });
+        const endLabel = lastDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: timezone });
+        const studentTimezone = getDisplayTimezone();
+        const timezoneLabel = studentTimezone && studentTimezone !== timezone
+            ? `${timezone} · Student view: ${studentTimezone}`
+            : timezone;
+        rangeLabel.textContent = calendarView === "day"
+            ? `${startLabel}, ${firstDate.toLocaleDateString("en-US", { year: "numeric", timeZone: timezone })} · ${timezoneLabel}`
+            : `${startLabel} – ${endLabel} · ${timezoneLabel}`;
+    }
+
+    if (calendarView === "agenda") {
+        const agendaItems = dayKeys.flatMap((dateKey) => (
+            (eventsByDay.get(dateKey) || []).map((event) => ({ ...event, dateKey }))
+        )).sort((a, b) => a.startMs - b.startMs);
+        grid.className = "teacher-calendar-grid teacher-calendar-grid--agenda";
+        grid.style.gridTemplateColumns = "";
+        grid.innerHTML = agendaItems.length
+            ? agendaItems.map((event) => {
+                const teacherTime = new Date(event.startMs).toLocaleString([], {
+                    weekday: "short",
+                    month: "short",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    timeZone: timezone,
+                });
+                const studentTimezone = event.studentTimezone || getDisplayTimezone();
+                const studentTime = studentTimezone !== timezone
+                    ? new Date(event.startMs).toLocaleString([], {
+                        weekday: "short",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        timeZone: studentTimezone,
+                    })
+                    : "";
+                const bookingAttribute = event.id ? ` data-calendar-booking-id="${escapeHtml(event.id)}"` : "";
+                return `<button type="button" class="teacher-agenda-item is-${event.type}"${bookingAttribute}>
+                    <span>${escapeHtml(teacherTime)}</span>
+                    <strong>${escapeHtml(event.label)}</strong>
+                    ${studentTime ? `<small>Student timezone: ${escapeHtml(studentTime)}</small>` : ""}
+                </button>`;
+            }).join("")
+            : `<div class="teacher-calendar-empty">No lessons or busy times in this period.</div>`;
+        return;
+    }
+
+    const headerCells = dayKeys.map((dateKey) => {
+        const [year, month, day] = dateKey.split("-").map(Number);
+        const date = new Date(zonedDateTimeToUtcMs(timezone, year, month, day, 12, 0));
+        const weekday = date.toLocaleDateString("en-US", { weekday: "short", timeZone: timezone });
+        return `<div class="teacher-calendar-day-head${dateKey === todayKey ? " is-today" : ""}">
+            <span>${escapeHtml(weekday)}</span><strong>${day}</strong>
+        </div>`;
+    }).join("");
+
+    const timeLabels = Array.from({ length: endHour - startHour + 1 }, (_, index) => {
+        const hour = startHour + index;
+        const label = new Date(2000, 0, 1, hour).toLocaleTimeString([], { hour: "numeric" });
+        return `<span style="top:${index * 60}px">${escapeHtml(label)}</span>`;
+    }).join("");
+
+    const dayColumns = dayKeys.map((dateKey) => {
+        const eventHtml = (eventsByDay.get(dateKey) || []).map((event) => {
+            const parts = getZonedParts(new Date(event.startMs), timezone);
+            const startMinute = parts.hour * 60 + parts.minute;
+            const top = Math.max(0, (startMinute - startHour * 60) * pixelsPerMinute);
+            const availableHeight = Math.max(0, calendarHeight - top);
+            const height = Math.min(Math.max(28, event.durationMinutes * pixelsPerMinute), availableHeight);
+            if (top >= calendarHeight || height <= 0) return "";
+            const endTime = new Date(event.startMs + event.durationMinutes * 60000);
+            const time = `${new Date(event.startMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: timezone })}–${endTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: timezone })}`;
+            const studentTimezone = event.studentTimezone || "";
+            const studentTime = studentTimezone && studentTimezone !== timezone
+                ? new Date(event.startMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: studentTimezone })
+                : "";
+            const bookingAttribute = event.id
+                ? ` draggable="true" data-calendar-booking-id="${escapeHtml(event.id)}" data-calendar-slot="${event.startMs}"`
+                : "";
+            return `<button type="button" class="teacher-calendar-event is-${event.type}" style="top:${top}px;height:${height}px"${bookingAttribute}>
+                <span>${escapeHtml(time)}</span>
+                <strong>${escapeHtml(event.label)}</strong>
+                ${studentTime ? `<em>Student: ${escapeHtml(studentTime)}</em>` : ""}
+                ${event.id ? `<i class="teacher-calendar-resize-handle" data-calendar-resize title="Drag to change lesson duration"></i>` : ""}
+            </button>`;
+        }).join("");
+        return `<div class="teacher-calendar-day-column${dateKey === todayKey ? " is-today" : ""}" data-calendar-date="${dateKey}" data-calendar-start-hour="${startHour}" data-calendar-end-hour="${endHour}" style="height:${calendarHeight}px">${eventHtml}</div>`;
+    }).join("");
+
+    grid.className = `teacher-calendar-grid teacher-calendar-grid--${calendarView}`;
+    grid.style.gridTemplateColumns = `64px repeat(${dayCount}, minmax(${calendarView === "day" ? "420px" : "135px"}, 1fr))`;
+    grid.innerHTML = `
+        <div class="teacher-calendar-head-spacer"></div>
+        ${headerCells}
+        <div class="teacher-calendar-time-axis" style="height:${calendarHeight}px">${timeLabels}</div>
+        ${dayColumns}
+    `;
+}
+
+function clearTeacherCalendarDropPreview() {
+    document.querySelectorAll(".teacher-calendar-day-column.is-drop-target").forEach((column) => {
+        column.classList.remove("is-drop-target");
+    });
+    document.querySelectorAll(".teacher-calendar-drop-preview").forEach((preview) => preview.remove());
+}
+
+function getTeacherCalendarDropDetails(column, clientY, booking) {
+    const dateKey = column?.dataset.calendarDate || "";
+    const startHour = Number(column?.dataset.calendarStartHour || 8);
+    const endHour = Number(column?.dataset.calendarEndHour || 23);
+    const rect = column?.getBoundingClientRect();
+    if (!dateKey || !rect) return null;
+    const durationMinutes = Number(
+        booking?.durationMinutes
+        || booking?.slotMinutes
+        || state.bookingSettings?.slotMinutes
+        || 50
+    );
+    const rawMinutes = startHour * 60 + (clientY - rect.top);
+    const snappedMinutes = Math.round(rawMinutes / 30) * 30;
+    const latestStart = endHour * 60 - durationMinutes;
+    const localMinutes = Math.max(startHour * 60, Math.min(latestStart, snappedMinutes));
+    const [year, month, day] = dateKey.split("-").map(Number);
+    const timezone = state.bookingSettings?.timezone || getTeacherTimezone();
+    const slot = zonedDateTimeToUtcMs(
+        timezone,
+        year,
+        month,
+        day,
+        Math.floor(localMinutes / 60),
+        localMinutes % 60
+    );
+    return {
+        slot,
+        top: localMinutes - startHour * 60,
+        height: Math.max(28, durationMinutes),
+        durationMinutes,
+    };
+}
+
+function showTeacherCalendarDropPreview(column, details) {
+    clearTeacherCalendarDropPreview();
+    if (!column || !details) return;
+    column.classList.add("is-drop-target");
+    const preview = document.createElement("div");
+    preview.className = "teacher-calendar-drop-preview";
+    preview.style.top = `${details.top}px`;
+    preview.style.height = `${details.height}px`;
+    preview.textContent = new Date(details.slot).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: state.bookingSettings?.timezone || getTeacherTimezone(),
+    });
+    column.appendChild(preview);
+}
+
+function showTeacherCalendarSelectionPreview(column, details, label = "New lesson") {
+    document.querySelectorAll(".teacher-calendar-selection-preview").forEach((preview) => preview.remove());
+    if (!column || !details) return;
+    const preview = document.createElement("div");
+    preview.className = "teacher-calendar-selection-preview";
+    preview.style.top = `${details.top}px`;
+    preview.style.height = `${Math.max(28, details.height)}px`;
+    preview.innerHTML = `<span>${escapeHtml(label)}</span><strong>${escapeHtml(new Date(details.slot).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: state.bookingSettings?.timezone || getTeacherTimezone(),
+    }))}</strong>`;
+    column.appendChild(preview);
+    return preview;
+}
+
+function clearTeacherCalendarSelectionPreview() {
+    document.querySelectorAll(".teacher-calendar-selection-preview").forEach((preview) => preview.remove());
+}
+
+async function commitTeacherCalendarMove(dragState, newSlot) {
+    if (!dragState?.bookingId || !dragState.booking || !newSlot) return;
+    if (newSlot === Number(dragState.booking.slot || 0)) return;
+    if (newSlot <= Date.now()) {
+        setStatus(els.teacherBookingMsg, "Choose a future time.", "error");
+        renderTeacherWeekCalendar();
+        return;
+    }
+    try {
+        setAppLoading(true, "Moving lesson...");
+        const previousSlot = Number(dragState.booking.slot || 0);
+        await rescheduleTeacherBooking(dragState.bookingId, dragState.booking, newSlot);
+        await refreshRuntimeBusyBlocks({ force: true });
+        await refreshTeacherBookings();
+        await renderBookingCalendar();
+        setStatus(els.teacherBookingMsg, "Lesson moved. The student schedule and Google Calendar are updated.", "success");
+        offerTeacherCalendarUndo(dragState.bookingId, previousSlot);
+    } catch (error) {
+        renderTeacherWeekCalendar();
+        setStatus(els.teacherBookingMsg, error.message || "Could not move the lesson.", "error");
+    } finally {
+        state.teacherCalendarDrag = {
+            ...dragState,
+            endedAt: Date.now(),
+        };
+        setAppLoading(false);
+    }
 }
 
 function startBalanceReconcileAutoRefresh() {
     if (state.balanceReconcileTimer) return;
     state.balanceReconcileTimer = window.setInterval(() => {
         if (!state.teacherUser || state.teacherRole !== "teacher") return;
+        if (document.hidden) return;
         reconcileStudentBalances()
             .then(async (result) => {
-                if (!result?.chargedCount) return;
-                setStatus(els.teacherStudentsMsg, `Deducted ${result.chargedCount} due lesson charge${result.chargedCount === 1 ? "" : "s"}.`, "success");
-                await refreshTeacherStudents();
-                await refreshTeacherBookings();
+                if (result?.chargedCount) {
+                    setStatus(els.teacherStudentsMsg, `Deducted ${result.chargedCount} due lesson charge${result.chargedCount === 1 ? "" : "s"}.`, "success");
+                    await refreshTeacherStudents();
+                    await refreshTeacherBookings();
+                }
             })
             .catch(console.error);
-    }, 60000);
+    }, 10 * 60 * 1000);
 }
 
 function stopBalanceReconcileAutoRefresh() {
     if (!state.balanceReconcileTimer) return;
     window.clearInterval(state.balanceReconcileTimer);
     state.balanceReconcileTimer = null;
+}
+
+function resizeImageToDataUrl(file, maxDimension = 300) {
+    return new Promise((resolve, reject) => {
+        if (!file || !file.type.startsWith("image/")) {
+            return reject(new Error("Selected file is not an image."));
+        }
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement("canvas");
+                let width = img.width;
+                let height = img.height;
+
+                if (width > height) {
+                    if (width > maxDimension) {
+                        height = Math.round((height * maxDimension) / width);
+                        width = maxDimension;
+                    }
+                } else if (height > maxDimension) {
+                    width = Math.round((width * maxDimension) / height);
+                    height = maxDimension;
+                }
+
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext("2d");
+                ctx.drawImage(img, 0, 0, width, height);
+
+                resolve(canvas.toDataURL("image/jpeg", 0.88));
+            };
+            img.onerror = () => reject(new Error("Failed to process image file."));
+            img.src = e.target.result;
+        };
+        reader.onerror = () => reject(new Error("Failed to read file."));
+        reader.readAsDataURL(file);
+    });
+}
+
+function updateAvatarPreview(url) {
+    const container = document.getElementById("avatarPreviewContainer");
+    const img = document.getElementById("avatarPreviewImg");
+    if (!container || !img) return;
+    const cleanUrl = (url || "").trim();
+    if (cleanUrl && (cleanUrl.startsWith("http") || cleanUrl.startsWith("data:image"))) {
+        img.src = cleanUrl;
+        container.style.display = "flex";
+    } else {
+        container.style.display = "none";
+        img.src = "";
+    }
+}
+
+function buildProfileVideoHtml(rawUrl) {
+    const url = (rawUrl || "").trim();
+    if (!url) return "";
+
+    let parsed;
+    try {
+        parsed = new URL(url);
+    } catch {
+        return "";
+    }
+
+    const host = parsed.hostname.replace(/^www\./, "");
+    let embedUrl = "";
+
+    if (host === "youtube.com" || host === "m.youtube.com" || host === "youtu.be" || host === "youtube-nocookie.com") {
+        let videoId = "";
+        if (host === "youtu.be") {
+            videoId = parsed.pathname.split("/").filter(Boolean)[0] || "";
+        } else if (parsed.pathname.startsWith("/watch")) {
+            videoId = parsed.searchParams.get("v") || "";
+        } else if (parsed.pathname.startsWith("/shorts/") || parsed.pathname.startsWith("/embed/")) {
+            videoId = parsed.pathname.split("/").filter(Boolean)[1] || "";
+        }
+        if (!videoId) return "";
+        embedUrl = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(videoId)}`;
+    } else if (host === "vimeo.com" || host === "player.vimeo.com") {
+        const parts = parsed.pathname.split("/").filter(Boolean);
+        const videoId = host === "player.vimeo.com" ? parts[1] : parts[0];
+        if (!videoId || !/^\d+$/.test(videoId)) return "";
+        embedUrl = `https://player.vimeo.com/video/${encodeURIComponent(videoId)}`;
+    } else if (url.match(/\.(mp4|webm|ogg)(\?.*)?$/i)) {
+        return `<video src="${escapeHtml(url)}" style="width:100%;height:100%;border:none;border-radius:var(--radius-md);object-fit:cover;" controls playsinline></video>`;
+    }
+
+    if (!embedUrl) return "";
+    return `<iframe src="${escapeHtml(embedUrl)}" style="width:100%;height:100%;border:none;border-radius:var(--radius-md);" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`;
+}
+
+function normalizeMeetingUrl(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    try {
+        const url = new URL(raw);
+        return url.protocol === "https:" ? url.href : "";
+    } catch {
+        return "";
+    }
+}
+
+function getClassroomMeetingUrl(booking) {
+    const bookingUrl = normalizeMeetingUrl(booking?.meetingUrl);
+    if (bookingUrl) return bookingUrl;
+    const configuredUrl = normalizeMeetingUrl(state.contactSettings?.classroomMeetingUrl);
+    if (configuredUrl) return configuredUrl;
+    return "";
+}
+
+function renderProfileUi() {
+    const p = state.profileSettings || createInitialProfileSettings();
+    if (els.preplyTeacherName) els.preplyTeacherName.textContent = p.name || "Jaffer";
+    if (els.preplyArabicName) els.preplyArabicName.textContent = "";
+    if (els.preplyTeacherHeadline) els.preplyTeacherHeadline.textContent = p.headline || "";
+    if (els.preplyHoursBadge) els.preplyHoursBadge.textContent = p.hoursTaught || "1,200+";
+    if (els.preplyStudentsBadge) els.preplyStudentsBadge.textContent = p.studentsCount || "85+";
+    if (els.preplyQuoteArabic) els.preplyQuoteArabic.textContent = p.quoteArabic ? `"${p.quoteArabic.replace(/^["'«»]|["'«»]$/g, '')}"` : "";
+    if (els.preplyBioText) {
+        els.preplyBioText.innerHTML = escapeHtml(p.bioText || "").replace(/\n/g, "<br>");
+
+        // Reset collapsible state to collapsed by default
+        els.preplyBioText.style.maxHeight = "180px";
+        if (els.preplyBioToggleText) els.preplyBioToggleText.textContent = "Read more";
+        if (els.preplyBioToggleChevron) els.preplyBioToggleChevron.style.transform = "rotate(0deg)";
+        if (els.bioFadeOverlay) {
+            els.bioFadeOverlay.style.opacity = "1";
+            els.bioFadeOverlay.style.display = "block";
+        }
+
+        // Measure after a small delay to let browser calculate rendering sizes
+        setTimeout(() => {
+            const isCollapsible = els.preplyBioText.scrollHeight > 185;
+            if (els.preplyBioToggleBtn) {
+                els.preplyBioToggleBtn.style.display = isCollapsible ? "inline-flex" : "none";
+            }
+            if (els.bioFadeOverlay) {
+                els.bioFadeOverlay.style.display = isCollapsible ? "block" : "none";
+            }
+        }, 50);
+    }
+    if (els.preplyRateDisplay) els.preplyRateDisplay.textContent = p.rateText ? `Regular rate: ${p.rateText}` : "Regular rate: $15 / 50 min";
+
+    if (els.preplyAvatarContainer) {
+        const avatarStr = (p.avatarUrl || "").trim();
+        if (avatarStr && (avatarStr.startsWith("http") || avatarStr.startsWith("data:image"))) {
+            els.preplyAvatarContainer.innerHTML = `
+                <img src="${escapeHtml(avatarStr)}" alt="Teacher Avatar" class="teacher-avatar-img" style="object-fit:cover; width:100%; height:100%; border-radius:50%;" />
+                <span class="online-status-badge" title="Online & Available"></span>
+            `;
+        }
+    }
+    updateAvatarPreview(p.avatarUrl);
+
+    if (els.preplyVideoContainer && p.videoUrl && p.videoUrl.trim()) {
+        const videoHtml = buildProfileVideoHtml(p.videoUrl);
+        if (videoHtml) {
+            els.preplyVideoContainer.innerHTML = videoHtml;
+        } else {
+            els.preplyVideoContainer.innerHTML = `
+                <div class="video-preview-overlay">
+                    <div class="video-preview-text">
+                        <strong>Video link not supported</strong>
+                        <p>Use a YouTube, Vimeo, or direct MP4/WebM video link.</p>
+                    </div>
+                </div>
+            `;
+        }
+    }
+
+    if (els.teacherProfileNameInput) els.teacherProfileNameInput.value = p.name || "";
+    if (els.teacherProfileRateInput) els.teacherProfileRateInput.value = p.rateText || "";
+    if (els.teacherProfileHeadlineInput) els.teacherProfileHeadlineInput.value = p.headline || "";
+    if (els.teacherProfileAvatarUrlInput) els.teacherProfileAvatarUrlInput.value = p.avatarUrl || "";
+    if (els.teacherProfileVideoUrlInput) els.teacherProfileVideoUrlInput.value = p.videoUrl || "";
+    if (els.teacherProfileHoursInput) els.teacherProfileHoursInput.value = p.hoursTaught || "";
+    if (els.teacherProfileStudentsInput) els.teacherProfileStudentsInput.value = p.studentsCount || "";
+    if (els.teacherProfileQuoteInput) els.teacherProfileQuoteInput.value = p.quoteArabic || "";
+    if (els.teacherProfileBioInput) els.teacherProfileBioInput.value = p.bioText || "";
+}
+
+function getReviewTimestamp(r) {
+    if (r.createdAt) return r.createdAt;
+    if (r.date) {
+        const parsed = Date.parse(r.date);
+        if (!isNaN(parsed)) return parsed;
+    }
+    return 0;
+}
+
+function renderReviewsUi() {
+    const list = state.reviews || [];
+    const count = list.length;
+    let totalStars = 0;
+    list.forEach(r => { totalStars += Number(r.rating || 5); });
+    const avgScore = count > 0 ? (totalStars / count).toFixed(1) : "5.0";
+
+    const hidePublic = !!state.profileSettings?.hideReviewsPublic;
+    if (els.studentReviewsSection) {
+        els.studentReviewsSection.hidden = hidePublic;
+    }
+    if (els.togglePublicReviewsBtn) {
+        els.togglePublicReviewsBtn.textContent = hidePublic ? "Show Reviews" : "Hide Reviews";
+        els.togglePublicReviewsBtn.className = hidePublic ? "btn btn--primary" : "btn btn--outline";
+    }
+
+    if (els.preplyReviewCountBadge) els.preplyReviewCountBadge.textContent = String(count);
+    if (els.preplyReviewCountHeader) els.preplyReviewCountHeader.textContent = String(count);
+    if (els.preplyAverageRatingLabel) els.preplyAverageRatingLabel.textContent = avgScore;
+    if (els.preplyAverageScoreText) els.preplyAverageScoreText.textContent = avgScore;
+    if (els.teacherReviewsCountLabel) els.teacherReviewsCountLabel.textContent = String(count);
+
+    if (els.preplyReviewsSort) {
+        els.preplyReviewsSort.value = state.reviewsSortMode || "newest";
+    }
+
+    if (els.preplyReviewsGrid) {
+        if (!count) {
+            els.preplyReviewsGrid.innerHTML = `<div class="small-note">No reviews published yet. Be the first to leave a review!</div>`;
+        } else {
+            const sortedList = [...list];
+            if (state.reviewsSortMode === "highest_rated") {
+                sortedList.sort((a, b) => {
+                    const ratingA = Number(a.rating || 5);
+                    const ratingB = Number(b.rating || 5);
+                    if (ratingB !== ratingA) return ratingB - ratingA;
+                    return getReviewTimestamp(b) - getReviewTimestamp(a);
+                });
+            } else {
+                sortedList.sort((a, b) => getReviewTimestamp(b) - getReviewTimestamp(a));
+            }
+
+            const visibleReviews = state.reviewsExpanded ? sortedList : sortedList.slice(0, 6);
+            els.preplyReviewsGrid.innerHTML = visibleReviews.map(r => {
+                const stars = "⭐".repeat(Math.min(5, Math.max(1, Number(r.rating || 5))));
+                const avatarText = escapeHtml(r.avatar || (r.name ? r.name.substring(0, 2).toUpperCase() : "ST"));
+                return `
+                    <div class="review-item" id="review-${escapeHtml(r.id)}" itemscope itemtype="https://schema.org/Review">
+                        <span itemprop="itemReviewed" itemscope itemtype="https://schema.org/Person" hidden>
+                            <meta itemprop="name" content="Jaffer" />
+                        </span>
+                        <div class="review-top">
+                            <div class="reviewer-info" itemprop="author" itemscope itemtype="https://schema.org/Person">
+                                <span class="reviewer-avatar">${avatarText}</span>
+                                <div>
+                                    <strong itemprop="name">${escapeHtml(r.name || "Student")}</strong>
+                                    <span class="reviewer-country">${escapeHtml(r.country || "🌐 Student")}</span>
+                                </div>
+                            </div>
+                            <span class="review-date">${escapeHtml(r.date || "Recent")}</span>
+                        </div>
+                        <div class="review-stars" itemprop="reviewRating" itemscope itemtype="https://schema.org/Rating">
+                            <meta itemprop="ratingValue" content="${Number(r.rating || 5)}" />
+                            <meta itemprop="bestRating" content="5" />
+                            <meta itemprop="worstRating" content="1" />
+                            ${stars}
+                        </div>
+                        <p class="review-text" itemprop="reviewBody">"${escapeHtml(r.text || "")}"</p>
+                        <span class="review-tag">${escapeHtml(r.tag || "Arabic Lesson")}</span>
+                    </div>
+                `;
+            }).join("");
+        }
+    }
+
+    if (els.studentReviewsToggleBtn) {
+        const hasMoreReviews = count > 6;
+        els.studentReviewsToggleBtn.hidden = !hasMoreReviews;
+        els.studentReviewsToggleBtn.textContent = state.reviewsExpanded
+            ? "Show fewer reviews"
+            : `Show all ${count} reviews`;
+        els.studentReviewsToggleBtn.setAttribute("aria-expanded", state.reviewsExpanded ? "true" : "false");
+    }
+
+    if (els.teacherReviewsAdminList) {
+        if (!count) {
+            els.teacherReviewsAdminList.innerHTML = `<div class="small-note">No reviews stored yet.</div>`;
+        } else {
+            els.teacherReviewsAdminList.innerHTML = list.map(r => {
+                return `
+                    <div class="review-admin-card" data-review-id="${escapeHtml(r.id)}">
+                        <div class="review-admin-card__main">
+                            <div class="review-admin-card__author">${escapeHtml(r.name || "Student")} (${escapeHtml(r.country || "Country")}) - ⭐ ${Number(r.rating || 5)}/5</div>
+                            <div class="review-admin-card__meta">Tag: ${escapeHtml(r.tag || "Lesson")} | Date: ${escapeHtml(r.date || "Recent")}${r.source && !/preply/i.test(r.source) ? " | " + escapeHtml(r.source) : ""}</div>
+                            <div class="review-admin-card__text">"${escapeHtml(r.text || "")}"</div>
+                        </div>
+                        <button type="button" class="btn btn--ghost btn--small" data-action="delete-review" data-id="${escapeHtml(r.id)}">Delete</button>
+                    </div>
+                `;
+            }).join("");
+        }
+    }
+}
+
+function syncStudentReviewUi() {
+    if (!els.studentReviewCard || !els.studentReviewForm || !els.studentReviewSuccessBox) return;
+    const user = state.currentUser;
+    const studentProfile = state.studentProfile || {};
+    const hasReviewed = localStorage.getItem(`review_submitted_${user?.uid || user?.email || "guest"}`) === "true" || studentProfile.hasSubmittedReview === true;
+    const reviewRequested = studentProfile.reviewRequested === true && !hasReviewed;
+
+    const shouldShowReviewCard = reviewRequested && !hasReviewed;
+    els.studentReviewCard.hidden = !shouldShowReviewCard;
+    els.studentReviewCard.style.display = shouldShowReviewCard ? "" : "none";
+
+    if (hasReviewed) {
+        els.studentReviewForm.hidden = true;
+        els.studentReviewSuccessBox.hidden = false;
+    } else if (!reviewRequested) {
+        els.studentReviewForm.hidden = true;
+        els.studentReviewSuccessBox.hidden = false;
+        els.studentReviewSuccessBox.innerHTML = `
+            <span class="badge-dot"></span>
+            <strong>Review not requested yet</strong>
+            <p class="small-note">The review form appears here only when the teacher asks you for feedback.</p>
+        `;
+    } else {
+        els.studentReviewForm.hidden = false;
+        els.studentReviewSuccessBox.hidden = true;
+        els.studentReviewSuccessBox.innerHTML = `
+            <span class="badge-dot"></span>
+            <strong>Thank you for your feedback!</strong>
+            <p class="small-note">Your feedback has been published on the teacher's profile.</p>
+        `;
+    }
 }
 
 async function refreshTeacherStudents() {
@@ -1896,6 +5920,8 @@ async function refreshTeacherStudents() {
         const students = [];
         snap.forEach((doc) => students.push({ id: doc.id, ...(doc.data() || {}) }));
         students.sort((a, b) => String(a.name || a.email || "").localeCompare(String(b.name || b.email || "")));
+        state.studentsCache = students;
+        updateTeacherOverviewStats();
         if (!students.length) {
             els.teacherStudentsList.innerHTML = "<div class=\"small-note\">No students yet.</div>";
             return;
@@ -1904,6 +5930,21 @@ async function refreshTeacherStudents() {
             state.studentCache.set(student.id, student);
             const balance = formatMoney(student.balance);
             const lessonPrice = toMoneyValue(student.lessonPrice);
+            const courseAccess = student.courseAccess === true;
+            const accessLabel = courseAccess ? "Course: unlocked" : "Course: locked";
+            const accessRequested = student.courseAccessRequested === true || student.paymentStatus === "pending";
+            const requestLabel = accessRequested && !courseAccess ? " | Access requested" : "";
+            const requestedPkg = student.requestedPackage || "Lesson Package";
+            const requestedAmt = Number(student.requestedAmount || 0);
+            const reviewRequested = student.reviewRequested === true;
+            const hasSubmittedReview = student.hasSubmittedReview === true;
+            const reviewStatus = hasSubmittedReview
+                ? "Review submitted"
+                : reviewRequested
+                    ? "Review requested"
+                    : "Review not requested";
+            const trialUsed = student.trialUsed === true;
+
             return `
                 <div class="student-admin-item" data-student-id="${escapeHtml(student.id)}">
                     <button class="student-admin-item__summary" type="button" data-student-action="toggle">
@@ -1911,21 +5952,88 @@ async function refreshTeacherStudents() {
                             <strong>${escapeHtml(student.name || "Student")}</strong>
                             <span>${escapeHtml(student.email || "")}</span>
                         </span>
-                        <span class="student-admin-item__money">Balance: ${balance}</span>
+                        <span class="student-admin-item__money">Balance: ${balance} | ${accessLabel}${requestLabel}</span>
                     </button>
                     <form class="student-admin-editor" data-student-editor hidden>
+                        ${accessRequested ? `
+                            <div style="background: #fef3c7; border: 1px solid #f59e0b; color: #92400e; padding: 10px 12px; border-radius: 8px; font-weight: 600; margin-bottom: 12px; font-size: 0.9rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                                <span>⚡ Payment Request: <strong>${escapeHtml(requestedPkg)}</strong> ${requestedAmt ? `($${requestedAmt})` : ""}</span>
+                                <button type="button" class="btn btn--primary btn--small" data-quick-credit="${requestedAmt || 135}" data-student-id="${escapeHtml(student.id)}">Approve & Add +$${requestedAmt || 135}</button>
+                            </div>
+                        ` : ""}
+
+                        <div style="margin-bottom: 10px;">
+                            <span style="font-size: 0.8rem; font-weight: 700; color: var(--ink-light); display: block; margin-bottom: 4px;">⚡ Quick Add Credit (1-Click):</span>
+                            <div class="quick-credit-btn-group">
+                                <button type="button" class="btn btn--outline btn--small" data-quick-credit="15" data-student-id="${escapeHtml(student.id)}">+$15 (1 Lesson)</button>
+                                <button type="button" class="btn btn--outline btn--small" data-quick-credit="40" data-student-id="${escapeHtml(student.id)}">+$40 (4 Lessons)</button>
+                                <button type="button" class="btn btn--outline btn--small" data-quick-credit="70" data-student-id="${escapeHtml(student.id)}">+$70 (5 Lessons)</button>
+                                <button type="button" class="btn btn--outline btn--small" data-quick-credit="135" data-student-id="${escapeHtml(student.id)}">+$135 (10 Lessons)</button>
+                                <button type="button" class="btn btn--outline btn--small" data-quick-credit="250" data-student-id="${escapeHtml(student.id)}">+$250 (20 Lessons)</button>
+                            </div>
+                        </div>
+
+                        <div style="margin-bottom: 12px; background: #f8fafc; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
+                            <span style="font-size: 0.86rem; font-weight: 700; color: var(--ink);">Review status: ${escapeHtml(reviewStatus)}</span>
+                            ${hasSubmittedReview ? "" : `
+                                <button type="button" class="btn btn--outline btn--small" data-student-action="request-review" data-student-id="${escapeHtml(student.id)}" ${reviewRequested ? "disabled" : ""}>
+                                    ${reviewRequested ? "Review Requested" : "Ask for Review"}
+                                </button>
+                            `}
+                        </div>
+
+                        <div class="student-trial-control">
+                            <span><strong>Free trial:</strong> ${trialUsed ? "Already used" : "Available"}</span>
+                            <button type="button" class="btn btn--outline btn--small" data-student-action="${trialUsed ? "reset-trial" : "mark-trial-used"}" data-student-id="${escapeHtml(student.id)}">
+                                ${trialUsed ? "Reset Free Trial" : "Mark Trial as Used"}
+                            </button>
+                        </div>
+
                         <div class="inline-fields">
                             <label class="field">
-                                <span>Balance</span>
+                                <span>Balance ($)</span>
                                 <input data-student-balance type="number" step="0.01" value="${escapeHtml(toMoneyValue(student.balance))}" />
                             </label>
                             <label class="field">
-                                <span>Lesson Price</span>
+                                <span>Lesson Price ($)</span>
                                 <input data-student-price type="number" min="0" step="0.01" value="${escapeHtml(lessonPrice)}" />
                             </label>
                             <label class="field">
                                 <span>Phone</span>
                                 <input value="${escapeHtml(student.phone || "")}" disabled />
+                            </label>
+                        </div>
+                        <div style="display: flex; gap: 24px; margin-bottom: 12px; flex-wrap: wrap;">
+                            <label class="field checkbox-field" style="margin: 0; flex: 1; min-width: 200px;">
+                                <span>Course Access</span>
+                                <label><input data-student-course-access type="checkbox" ${courseAccess ? "checked" : ""} /> Unlock full course for this student</label>
+                            </label>
+                            <label class="field checkbox-field" style="margin: 0; flex: 1; min-width: 250px;">
+                                <span>Overdraft Booking</span>
+                                <label><input data-student-allow-overdraft type="checkbox" ${student.allowOverdraft === true ? "checked" : ""} /> Allow booking with 0 or negative balance</label>
+                            </label>
+                        </div>
+                        <div class="inline-fields">
+                            <label class="field">
+                                <span>Access Type</span>
+                                <select data-student-access-type>
+                                    <option value="none" ${!courseAccess ? "selected" : ""}>No access</option>
+                                    <option value="lifetime" ${student.accessType === "lifetime" ? "selected" : ""}>Lifetime</option>
+                                    <option value="trial" ${student.accessType === "trial" ? "selected" : ""}>Trial</option>
+                                    <option value="manual" ${student.accessType === "manual" ? "selected" : ""}>Manual</option>
+                                </select>
+                            </label>
+                            <label class="field">
+                                <span>Payment Status</span>
+                                <select data-student-payment-status>
+                                    <option value="none" ${!student.paymentStatus || student.paymentStatus === "none" ? "selected" : ""}>None</option>
+                                    <option value="pending" ${student.paymentStatus === "pending" ? "selected" : ""}>Pending</option>
+                                    <option value="approved" ${student.paymentStatus === "approved" ? "selected" : ""}>Approved</option>
+                                </select>
+                            </label>
+                            <label class="field">
+                                <span>Payment Note</span>
+                                <input data-student-payment-note type="text" value="${escapeHtml(student.paymentNote || "")}" placeholder="PayPal email, transaction ID, offer..." />
                             </label>
                         </div>
                         <div class="action-row">
@@ -1942,13 +6050,93 @@ async function refreshTeacherStudents() {
     }
 }
 
-async function saveStudentFinance(studentId, balance, lessonPrice) {
-    await window.db.collection("users").doc(studentId).set({
-        balance: toMoneyValue(balance),
+async function saveStudentFinance(studentId, balance, lessonPrice, accessData = {}) {
+    const userRef = window.db.collection("users").doc(studentId);
+    const userSnap = await userRef.get();
+    const userData = userSnap.exists ? (userSnap.data() || {}) : {};
+
+    const oldBalance = Number(userData.balance || 0);
+    const newBalance = toMoneyValue(balance);
+    const diff = newBalance - oldBalance;
+    const now = Date.now();
+
+    const updateData = {
+        balance: newBalance,
         lessonPrice: toMoneyValue(lessonPrice),
-        financeUpdatedAt: Date.now(),
+        courseAccess: accessData.courseAccess === true,
+        accessType: accessData.courseAccess ? (accessData.accessType || "lifetime") : "none",
+        accessProduct: accessData.courseAccess ? "palestinian-arabic-starter" : "",
+        paymentStatus: accessData.paymentStatus || "none",
+        paymentNote: (accessData.paymentNote || "").trim().slice(0, 300),
+        courseAccessRequested: accessData.courseAccess ? false : accessData.courseAccessRequested === true,
+        courseAccessUpdatedAt: now,
+        financeUpdatedAt: now,
+        updatedAt: window.firebase.firestore.FieldValue.serverTimestamp(),
+    };
+
+    if (typeof accessData.allowOverdraft !== "undefined") {
+        updateData.allowOverdraft = accessData.allowOverdraft === true;
+    }
+
+    if (typeof accessData.reviewRequested !== "undefined") {
+        updateData.reviewRequested = accessData.reviewRequested === true;
+        updateData.reviewRequestedAt = accessData.reviewRequested ? now : null;
+    }
+
+    if (diff !== 0) {
+        const txDesc = diff > 0
+            ? `📥 Balance Credited: +$${diff.toFixed(2)}${accessData.paymentNote ? ` (${accessData.paymentNote})` : ""}`
+            : `📤 Balance Adjusted: -$${Math.abs(diff).toFixed(2)}`;
+
+        const tx = {
+            id: `tx_${now}_${Math.random().toString(36).substr(2, 5)}`,
+            at: now,
+            amount: diff,
+            type: diff > 0 ? "credit" : "charge",
+            description: txDesc,
+            newBalance: newBalance
+        };
+        updateData.transactions = window.firebase.firestore.FieldValue.arrayUnion(tx);
+    }
+
+    const teacherRef = window.db.collection("teachers").doc(state.teacherUser.uid);
+    await window.db.runTransaction(async (transaction) => {
+        const teacherSnap = await transaction.get(teacherRef);
+        transaction.set(userRef, updateData, { merge: true });
+        if (diff !== 0) {
+            const teacherData = teacherSnap.exists ? (teacherSnap.data() || {}) : {};
+            const currentRevenue = Number.isFinite(Number(teacherData.revenueTotal))
+                ? Number(teacherData.revenueTotal)
+                : 0;
+            transaction.set(teacherRef, {
+                revenueTotal: currentRevenue + diff,
+                revenueUpdatedAt: now,
+            }, { merge: true });
+        }
+    });
+    state.teacherRevenueTotal = Number(state.teacherRevenueTotal ?? 0) + diff;
+    updateTeacherOverviewStats();
+}
+
+async function markStudentTrialUsed(studentId) {
+    if (!studentId) throw new Error("Choose a student first.");
+    await window.db.collection("users").doc(studentId).set({
+        trialUsed: true,
+        trialUsedAt: Date.now(),
         updatedAt: window.firebase.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
+}
+
+async function resetStudentFreeTrial(studentId) {
+    if (!studentId) throw new Error("Choose a student first.");
+    const batch = window.db.batch();
+    batch.set(window.db.collection("users").doc(studentId), {
+        trialUsed: false,
+        trialUsedAt: window.firebase.firestore.FieldValue.delete(),
+        updatedAt: window.firebase.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    batch.delete(window.db.collection("trialClaims").doc(studentId));
+    await batch.commit();
 }
 
 async function deleteStudentProfile(studentId) {
@@ -1965,15 +6153,21 @@ async function loadBalanceChargeCandidates(now) {
     };
 
     try {
+        const recentPastCutoff = now - 7 * 24 * 60 * 60 * 1000;
         const pastSnap = await window.db
             .collection("bookings")
+            .where("slot", ">=", recentPastCutoff)
             .where("slot", "<=", now)
             .orderBy("slot", "desc")
-            .limit(300)
+            .limit(50)
             .get();
         addDocs(pastSnap);
     } catch {
-        const fallbackSnap = await window.db.collection("bookings").limit(500).get();
+        const fallbackSnap = await window.db
+            .collection("bookings")
+            .orderBy("slot", "desc")
+            .limit(50)
+            .get();
         addDocs(fallbackSnap);
     }
 
@@ -1981,7 +6175,7 @@ async function loadBalanceChargeCandidates(now) {
         const canceledSnap = await window.db
             .collection("bookings")
             .where("status", "==", "canceled")
-            .limit(300)
+            .limit(50)
             .get();
         addDocs(canceledSnap);
     } catch {}
@@ -1998,7 +6192,7 @@ async function reconcileStudentBalances() {
     for (const doc of docs) {
         const booking = doc.data() || {};
         const status = String(booking.status || "booked").toLowerCase();
-        if (!booking.studentUid || booking.balanceChargedAt) continue;
+        if (!booking.studentUid || booking.balanceChargedAt || booking.balanceCharged) continue;
         const shouldChargeAttended = Number(booking.slot || 0) <= now && (status === "booked" || status === "rescheduled");
         const canceledAt = Number(booking.canceledAt || 0);
         const lateCanceled = status === "canceled" &&
@@ -2013,15 +6207,35 @@ async function reconcileStudentBalances() {
             studentDocs.set(booking.studentUid, studentSnap);
         }
         const student = studentSnap.exists ? (studentSnap.data() || {}) : {};
-        const lessonPrice = toMoneyValue(booking.lessonPrice || student.lessonPrice);
-        if (!lessonPrice) {
+
+        const isFreeTrial = booking.isFreeTrial === true;
+        const lessonPrice = isFreeTrial ? 0 : toMoneyValue(booking.lessonPrice || student.lessonPrice);
+
+        if (lessonPrice === 0 && !isFreeTrial) {
             missingPrice.add(booking.studentUid);
             continue;
         }
-        const chargeReason = lateCanceled ? "late-cancel" : "lesson";
+
+        const chargeReason = isFreeTrial ? "free-trial" : (lateCanceled ? "late-cancel" : "lesson");
+        const lessonDateStr = new Date(booking.slot).toLocaleDateString("en-US", { weekday: "long", hour: "2-digit", minute: "2-digit" });
+
+        const txDesc = isFreeTrial
+            ? `🎁 First Free Lesson: ${lessonDateStr}`
+            : (lateCanceled ? `❌ Late cancellation charge: ${lessonDateStr}` : `Lesson deduction: ${lessonDateStr}`);
+
+        const tx = {
+            id: `tx_${doc.id}_charge`,
+            at: now,
+            amount: -lessonPrice,
+            type: isFreeTrial ? "trial" : (lateCanceled ? "late-cancel" : "charge"),
+            description: txDesc,
+            newBalance: toMoneyValue(student.balance) - lessonPrice
+        };
+
         const batch = window.db.batch();
         batch.set(window.db.collection("users").doc(booking.studentUid), {
             balance: toMoneyValue(student.balance) - lessonPrice,
+            transactions: window.firebase.firestore.FieldValue.arrayUnion(tx),
             financeUpdatedAt: now,
             updatedAt: window.firebase.firestore.FieldValue.serverTimestamp(),
         }, { merge: true });
@@ -2041,7 +6255,11 @@ async function reconcileStudentBalances() {
         await batch.commit();
         studentDocs.set(booking.studentUid, {
             exists: true,
-            data: () => ({ ...student, balance: toMoneyValue(student.balance) - lessonPrice }),
+            data: () => ({
+                ...student,
+                balance: toMoneyValue(student.balance) - lessonPrice,
+                transactions: [...(student.transactions || []), tx]
+            }),
         });
         chargedCount += 1;
     }
@@ -2051,11 +6269,14 @@ async function reconcileStudentBalances() {
 function updateEmailQuotaUi(result) {
     if (!els.appsScriptEmailQuota || !els.appsScriptEmailQuotaValue) return;
     if (!result?.success || !Number.isFinite(Number(result.emailQuotaRemaining))) {
-        els.appsScriptEmailQuota.hidden = true;
+        els.appsScriptEmailQuota.hidden = false;
+        els.appsScriptEmailQuotaValue.textContent = "Unavailable";
+        els.appsScriptEmailQuota.title = result?.message || "Connect and test Apps Script to load the email quota.";
         return;
     }
     els.appsScriptEmailQuota.hidden = false;
     els.appsScriptEmailQuotaValue.textContent = String(Number(result.emailQuotaRemaining));
+    els.appsScriptEmailQuota.title = result?.resetWindow || "Remaining daily email recipients reported by Google Apps Script.";
 }
 
 async function refreshAppsScriptEmailQuota({ silent = true } = {}) {
@@ -2079,8 +6300,10 @@ async function refreshGoogleCalendarStatus() {
     }
     await ensureGoogleCalendarModuleLoaded();
     const connected = await window.isGoogleCalendarConnected?.();
+    state.googleCalendarConnected = connected === true;
     const base = connected ? "Google Calendar is connected." : "Google Calendar is not connected.";
     setStatus(els.googleCalendarStatus, [base, state.googleCalendarMessage].filter(Boolean).join(" "));
+    updateSystemSyncStatusIndicator();
 }
 
 window.updateGoogleCalendarStatusMessage = (message) => {
@@ -2149,6 +6372,103 @@ function wireTeacherActions() {
         await withButtonLoading(els.teacherLogoutBtn, "Signing out...", () => window.auth.signOut());
     });
 
+    els.teacherProfileForm?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        try {
+            await withButtonLoading(els.saveTeacherProfileBtn, "Saving...", async () => {
+                const updated = {
+                    ...state.profileSettings,
+                    name: (els.teacherProfileNameInput?.value || "").trim() || "Jaffer",
+                    headline: (els.teacherProfileHeadlineInput?.value || "").trim(),
+                    rateText: (els.teacherProfileRateInput?.value || "").trim(),
+                    avatarUrl: (els.teacherProfileAvatarUrlInput?.value || "").trim(),
+                    videoUrl: (els.teacherProfileVideoUrlInput?.value || "").trim(),
+                    hoursTaught: (els.teacherProfileHoursInput?.value || "").trim() || "1,200+",
+                    studentsCount: (els.teacherProfileStudentsInput?.value || "").trim() || "85+",
+                    quoteArabic: (els.teacherProfileQuoteInput?.value || "").trim(),
+                    bioText: (els.teacherProfileBioInput?.value || "").trim(),
+                };
+                state.profileSettings = updated;
+                saveLocalProfileSettings("teacher_profile_v1", updated);
+                await saveCloudProfileSettings(window.db, updated);
+                renderProfileUi();
+                setStatus(els.teacherProfileMsg, "Profile settings saved successfully!", "success");
+            });
+        } catch (error) {
+            setStatus(els.teacherProfileMsg, error.message || "Could not save profile settings.", "error");
+        }
+    });
+
+    els.teacherProfileAvatarFileInput?.addEventListener("change", async (event) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        try {
+            setStatus(els.teacherProfileMsg, "Optimizing image...", "");
+            const dataUrl = await resizeImageToDataUrl(file, 300);
+            if (els.teacherProfileAvatarUrlInput) {
+                els.teacherProfileAvatarUrlInput.value = dataUrl;
+            }
+            updateAvatarPreview(dataUrl);
+            setStatus(els.teacherProfileMsg, "Image ready! Click 'Save Profile Settings' to apply.", "success");
+        } catch (err) {
+            setStatus(els.teacherProfileMsg, err.message || "Could not process image.", "error");
+        }
+    });
+
+    els.teacherProfileAvatarUrlInput?.addEventListener("input", (e) => {
+        updateAvatarPreview(e.target.value);
+    });
+
+    document.getElementById("removeAvatarBtn")?.addEventListener("click", () => {
+        if (els.teacherProfileAvatarUrlInput) els.teacherProfileAvatarUrlInput.value = "";
+        if (els.teacherProfileAvatarFileInput) els.teacherProfileAvatarFileInput.value = "";
+        updateAvatarPreview("");
+        setStatus(els.teacherProfileMsg, "Image removed. Click 'Save Profile Settings' to revert to default avatar.", "success");
+    });
+
+    els.togglePublicReviewsBtn?.addEventListener("click", async () => {
+        if (!state.profileSettings) {
+            state.profileSettings = createInitialProfileSettings();
+        }
+        const newVal = !state.profileSettings.hideReviewsPublic;
+        state.profileSettings.hideReviewsPublic = newVal;
+        saveLocalProfileSettings("teacher_profile_v1", state.profileSettings);
+        try {
+            await saveCloudProfileSettings(window.db, state.profileSettings);
+        } catch (err) {
+            console.error("Could not save public reviews visibility setting to cloud", err);
+        }
+        renderReviewsUi();
+    });
+
+    els.toggleAdminReviewsListBtn?.addEventListener("click", () => {
+        const list = document.getElementById("teacherReviewsAdminList");
+        if (!list) return;
+        const isHidden = list.style.display === "none";
+        list.style.display = isHidden ? "" : "none";
+        els.toggleAdminReviewsListBtn.textContent = isHidden ? "Hide List" : "Show List";
+        els.toggleAdminReviewsListBtn.className = isHidden ? "btn btn--ghost btn--small" : "btn btn--primary btn--small";
+    });
+
+    els.teacherReviewsAdminList?.addEventListener("click", async (event) => {
+        const button = event.target.closest("[data-action='delete-review']");
+        if (!button) return;
+        const reviewId = button.getAttribute("data-id");
+        if (!reviewId) return;
+        if (!window.confirm("Are you sure you want to delete this review?")) return;
+
+        try {
+            await withButtonLoading(button, "...", async () => {
+                await deleteReviewFromCloud(window.db, reviewId);
+                state.reviews = state.reviews.filter(r => r.id !== reviewId);
+                saveLocalReviews("teacher_reviews_v1", state.reviews);
+                renderReviewsUi();
+            });
+        } catch (error) {
+            console.error("Failed to delete review:", error);
+        }
+    });
+
     els.availabilityForm?.addEventListener("submit", async (event) => {
         event.preventDefault();
         const submitter = event.submitter;
@@ -2187,6 +6507,42 @@ function wireTeacherActions() {
         });
     });
 
+    els.courseOffersForm?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        try {
+            await withButtonLoading(event.submitter, "Saving...", saveCourseOffers);
+        } catch (error) {
+            setStatus(els.courseOffersMsg, error.message || "Could not save course offers.", "error");
+        }
+    });
+
+    els.teacherAddPackageBtn?.addEventListener("click", () => {
+        const current = gatherPackagesFromUi();
+        const newId = `pkg-${Date.now()}`;
+        current.push({
+            id: newId,
+            badge: "New Promo",
+            lessons: 10,
+            price: Math.round((state.bookingSettings.courseOffers?.courseAccessPrice || 10) * 10 * 0.9),
+            popular: current.length === 0
+        });
+        state.bookingSettings.courseOffers.packages = current;
+        renderTeacherPackagesUi();
+    });
+
+    els.teacherPackagesForm?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        try {
+            const submitter = event.submitter || event.target.querySelector("button[type='submit']");
+            await withButtonLoading(submitter, "Saving...", async () => {
+                await saveTeacherPackages();
+            });
+            setStatus(els.teacherPackagesMsg, "Lesson packages saved and published on the main page.", "success");
+        } catch (error) {
+            setStatus(els.teacherPackagesMsg, error.message || "Could not save lesson packages.", "error");
+        }
+    });
+
     els.contactSettingsForm?.addEventListener("submit", async (event) => {
         event.preventDefault();
         const submitter = event.submitter;
@@ -2194,6 +6550,12 @@ function wireTeacherActions() {
             await withButtonLoading(submitter, "Saving...", async () => {
                 state.contactSettings.whatsapp = (els.teacherWhatsapp?.value || "").trim();
                 state.contactSettings.email = (els.teacherContactEmail?.value || "").trim();
+                const rawMeetingUrl = (els.teacherClassroomMeetingUrl?.value || "").trim();
+                const meetingUrl = normalizeMeetingUrl(rawMeetingUrl);
+                if (rawMeetingUrl && !meetingUrl) {
+                    throw new Error("Use a valid https meeting link.");
+                }
+                state.contactSettings.classroomMeetingUrl = meetingUrl;
                 await saveTeacherContactSettings();
             });
             setStatus(els.contactMsg, "Contact settings saved.", "success");
@@ -2259,13 +6621,26 @@ function wireTeacherActions() {
         setStatus(els.appsScriptMsg, message, result?.success ? "success" : "error");
     });
 
+    els.appsScriptPreplyStatsBtn?.addEventListener("click", async (event) => {
+        try {
+            const syncResult = await withButtonLoading(event.currentTarget, "Syncing...", syncPreplyStatistics);
+            setStatus(
+                els.appsScriptMsg,
+                syncResult.firstSync
+                    ? "Preply baseline saved. Future completed lessons and new students will increase the public totals."
+                    : `Preply statistics synced: +${syncResult.newLessons} lessons, +${syncResult.newStudents} students.`,
+                "success"
+            );
+        } catch (error) {
+            setStatus(els.appsScriptMsg, error.message || "Could not sync Preply statistics.", "error");
+        }
+    });
+
     els.appsScriptBalanceCheckBtn?.addEventListener("click", async (event) => {
-        const result = await withButtonLoading(event.currentTarget, "Checking...", () => window.reconcileBalancesViaAppsScript?.());
+        const result = await withButtonLoading(event.currentTarget, "Checking...", () => reconcileStudentBalances());
         const count = Number(result?.chargedCount || 0);
-        const message = result?.message
-            ? `${result.message} Deducted ${count} lesson charge${count === 1 ? "" : "s"}.`
-            : `Deducted ${count} lesson charge${count === 1 ? "" : "s"}.`;
-        setStatus(els.appsScriptMsg, message, result?.success ? "success" : "error");
+        const message = `Balance check finished. Deducted ${count} lesson charge${count === 1 ? "" : "s"}.`;
+        setStatus(els.appsScriptMsg, message, "success");
         await refreshTeacherStudents();
     });
 
@@ -2312,6 +6687,259 @@ function wireTeacherActions() {
         withButtonLoading(event.currentTarget, "Refreshing...", () => refreshTeacherBookings()).catch(console.error);
     });
 
+    document.getElementById("teacherCalendarPrevBtn")?.addEventListener("click", () => {
+        state.teacherCalendarWeekOffset = Number(state.teacherCalendarWeekOffset || 0) - 1;
+        renderTeacherWeekCalendar();
+    });
+
+    document.getElementById("teacherCalendarTodayBtn")?.addEventListener("click", () => {
+        state.teacherCalendarWeekOffset = 0;
+        renderTeacherWeekCalendar();
+    });
+
+    document.getElementById("teacherCalendarNextBtn")?.addEventListener("click", () => {
+        state.teacherCalendarWeekOffset = Number(state.teacherCalendarWeekOffset || 0) + 1;
+        renderTeacherWeekCalendar();
+    });
+
+    document.querySelectorAll("[data-teacher-calendar-view]").forEach((button) => {
+        button.addEventListener("click", () => {
+            state.teacherCalendarView = button.dataset.teacherCalendarView || "week";
+            state.teacherCalendarWeekOffset = 0;
+            document.querySelectorAll("[data-teacher-calendar-view]").forEach((item) => {
+                item.classList.toggle("is-active", item === button);
+            });
+            renderTeacherWeekCalendar();
+        });
+    });
+
+    const teacherCalendarGrid = document.getElementById("teacherCalendarGrid");
+
+    teacherCalendarGrid?.addEventListener("pointerdown", (event) => {
+        const handle = event.target.closest("[data-calendar-resize]");
+        if (!handle) return;
+        const calendarEvent = handle.closest("[data-calendar-booking-id]");
+        const bookingId = calendarEvent?.dataset.calendarBookingId || "";
+        const booking = state.bookingCache instanceof Map ? state.bookingCache.get(bookingId) : null;
+        if (!calendarEvent || !booking) return;
+        event.preventDefault();
+        event.stopPropagation();
+        calendarEvent.draggable = false;
+        state.teacherCalendarResize = {
+            bookingId,
+            booking,
+            calendarEvent,
+            pointerId: event.pointerId,
+            startY: event.clientY,
+            initialDuration: Number(booking.durationMinutes || booking.slotMinutes || state.bookingSettings?.slotMinutes || 50),
+            durationMinutes: Number(booking.durationMinutes || booking.slotMinutes || state.bookingSettings?.slotMinutes || 50),
+        };
+        handle.setPointerCapture?.(event.pointerId);
+        calendarEvent.classList.add("is-resizing");
+    });
+
+    window.addEventListener("pointermove", (event) => {
+        const resizeState = state.teacherCalendarResize;
+        if (!resizeState || resizeState.pointerId !== event.pointerId) return;
+        event.preventDefault();
+        const deltaMinutes = Math.round((event.clientY - resizeState.startY) / 5) * 5;
+        const durationMinutes = Math.max(30, Math.min(180, resizeState.initialDuration + deltaMinutes));
+        resizeState.durationMinutes = durationMinutes;
+        resizeState.calendarEvent.style.height = `${durationMinutes}px`;
+        resizeState.calendarEvent.dataset.resizeLabel = `${durationMinutes} min`;
+    }, { passive: false });
+
+    window.addEventListener("pointerup", async (event) => {
+        const resizeState = state.teacherCalendarResize;
+        if (!resizeState || resizeState.pointerId !== event.pointerId) return;
+        state.teacherCalendarResize = null;
+        resizeState.calendarEvent.classList.remove("is-resizing");
+        resizeState.calendarEvent.draggable = true;
+        if (resizeState.durationMinutes === resizeState.initialDuration) {
+            renderTeacherWeekCalendar();
+            return;
+        }
+        try {
+            setAppLoading(true, "Updating lesson duration...");
+            await resizeTeacherBooking(
+                resizeState.bookingId,
+                resizeState.booking,
+                resizeState.durationMinutes
+            );
+            await refreshRuntimeBusyBlocks({ force: true });
+            await refreshTeacherBookings();
+            await renderBookingCalendar();
+            setStatus(els.teacherBookingMsg, `Lesson duration updated to ${resizeState.durationMinutes} minutes.`, "success");
+        } catch (error) {
+            renderTeacherWeekCalendar();
+            setStatus(els.teacherBookingMsg, error.message || "Could not update lesson duration.", "error");
+        } finally {
+            setAppLoading(false);
+        }
+    });
+
+    teacherCalendarGrid?.addEventListener("pointerdown", (event) => {
+        if (event.pointerType !== "touch" || event.target.closest("[data-calendar-resize]")) return;
+        const calendarEvent = event.target.closest("[data-calendar-booking-id]");
+        const bookingId = calendarEvent?.dataset.calendarBookingId || "";
+        const booking = state.bookingCache instanceof Map ? state.bookingCache.get(bookingId) : null;
+        if (!calendarEvent || !booking) return;
+        const touchState = {
+            bookingId,
+            booking,
+            calendarEvent,
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            clientX: event.clientX,
+            clientY: event.clientY,
+            active: false,
+            timer: 0,
+        };
+        touchState.timer = window.setTimeout(() => {
+            touchState.active = true;
+            state.teacherCalendarDrag = { bookingId, booking, endedAt: 0 };
+            calendarEvent.classList.add("is-dragging");
+            navigator.vibrate?.(35);
+        }, 450);
+        state.teacherCalendarTouch = touchState;
+    });
+
+    teacherCalendarGrid?.addEventListener("pointermove", (event) => {
+        const touchState = state.teacherCalendarTouch;
+        if (!touchState || touchState.pointerId !== event.pointerId) return;
+        touchState.clientX = event.clientX;
+        touchState.clientY = event.clientY;
+        if (!touchState.active) {
+            const distance = Math.hypot(event.clientX - touchState.startX, event.clientY - touchState.startY);
+            if (distance > 10) {
+                window.clearTimeout(touchState.timer);
+                state.teacherCalendarTouch = null;
+            }
+            return;
+        }
+        event.preventDefault();
+        const pointedElement = document.elementFromPoint(event.clientX, event.clientY);
+        const column = pointedElement?.closest?.("[data-calendar-date]");
+        if (!column) return;
+        showTeacherCalendarDropPreview(
+            column,
+            getTeacherCalendarDropDetails(column, event.clientY, touchState.booking)
+        );
+    }, { passive: false });
+
+    window.addEventListener("pointerup", async (event) => {
+        const touchState = state.teacherCalendarTouch;
+        if (!touchState || touchState.pointerId !== event.pointerId) return;
+        window.clearTimeout(touchState.timer);
+        state.teacherCalendarTouch = null;
+        touchState.calendarEvent.classList.remove("is-dragging");
+        if (!touchState.active) return;
+        event.preventDefault();
+        const pointedElement = document.elementFromPoint(touchState.clientX, touchState.clientY);
+        const column = pointedElement?.closest?.("[data-calendar-date]");
+        const details = column
+            ? getTeacherCalendarDropDetails(column, touchState.clientY, touchState.booking)
+            : null;
+        clearTeacherCalendarDropPreview();
+        if (details) {
+            await commitTeacherCalendarMove(
+                { bookingId: touchState.bookingId, booking: touchState.booking, endedAt: 0 },
+                details.slot
+            );
+        }
+    }, { passive: false });
+
+    teacherCalendarGrid?.addEventListener("dragstart", (event) => {
+        const calendarEvent = event.target.closest("[data-calendar-booking-id]");
+        if (!calendarEvent) {
+            event.preventDefault();
+            return;
+        }
+        const bookingId = calendarEvent.dataset.calendarBookingId;
+        const booking = state.bookingCache instanceof Map ? state.bookingCache.get(bookingId) : null;
+        if (!booking) {
+            event.preventDefault();
+            return;
+        }
+        state.teacherCalendarDrag = { bookingId, booking, endedAt: 0 };
+        calendarEvent.classList.add("is-dragging");
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", bookingId);
+    });
+
+    teacherCalendarGrid?.addEventListener("dragover", (event) => {
+        const column = event.target.closest("[data-calendar-date]");
+        const dragState = state.teacherCalendarDrag;
+        if (!column || !dragState?.booking) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        showTeacherCalendarDropPreview(
+            column,
+            getTeacherCalendarDropDetails(column, event.clientY, dragState.booking)
+        );
+    });
+
+    teacherCalendarGrid?.addEventListener("drop", async (event) => {
+        const column = event.target.closest("[data-calendar-date]");
+        const dragState = state.teacherCalendarDrag;
+        if (!column || !dragState?.bookingId || !dragState.booking) return;
+        event.preventDefault();
+        const details = getTeacherCalendarDropDetails(column, event.clientY, dragState.booking);
+        clearTeacherCalendarDropPreview();
+        if (details) await commitTeacherCalendarMove(dragState, details.slot);
+    });
+
+    teacherCalendarGrid?.addEventListener("dragend", (event) => {
+        event.target.closest("[data-calendar-booking-id]")?.classList.remove("is-dragging");
+        clearTeacherCalendarDropPreview();
+        if (state.teacherCalendarDrag) {
+            state.teacherCalendarDrag.endedAt = Date.now();
+        }
+    });
+
+    let teacherCalendarClickTimer = null;
+    teacherCalendarGrid?.addEventListener("click", (event) => {
+        const calendarEvent = event.target.closest("[data-calendar-booking-id]");
+        if (!calendarEvent) {
+            const column = event.target.closest("[data-calendar-date]");
+            if (!column || event.target.closest(".teacher-calendar-drop-preview")) return;
+            const details = getTeacherCalendarDropDetails(
+                column,
+                event.clientY,
+                { durationMinutes: state.bookingSettings?.slotMinutes || 50 }
+            );
+            if (details?.slot > Date.now()) {
+                openTeacherCalendarCreateModal(details.slot, { column, details });
+            } else {
+                setStatus(els.teacherBookingMsg, "Choose a future time.", "error");
+            }
+            return;
+        }
+        if (Date.now() - Number(state.teacherCalendarDrag?.endedAt || 0) < 400) return;
+        const bookingId = calendarEvent.dataset.calendarBookingId;
+        const booking = state.bookingCache instanceof Map ? state.bookingCache.get(bookingId) : null;
+        if (!booking) return;
+        window.clearTimeout(teacherCalendarClickTimer);
+        teacherCalendarClickTimer = window.setTimeout(() => {
+            openRescheduleModal({
+                role: "teacher",
+                bookingId,
+                booking: { ...booking, id: bookingId },
+                allowCustom: true,
+            }).catch(console.error);
+        }, 220);
+    });
+
+    teacherCalendarGrid?.addEventListener("dblclick", (event) => {
+        const calendarEvent = event.target.closest("[data-calendar-booking-id]");
+        if (!calendarEvent) return;
+        window.clearTimeout(teacherCalendarClickTimer);
+        const bookingId = calendarEvent.dataset.calendarBookingId;
+        const booking = state.bookingCache instanceof Map ? state.bookingCache.get(bookingId) : null;
+        if (booking) showTeacherBookingDetails(bookingId, booking);
+    });
+
     els.refreshStudentsBtn?.addEventListener("click", (event) => {
         withButtonLoading(event.currentTarget, "Refreshing...", () => refreshTeacherStudents()).catch((error) => {
             setStatus(els.teacherStudentsMsg, error.message || "Could not refresh students.", "error");
@@ -2341,6 +6969,100 @@ function wireTeacherActions() {
             return;
         }
 
+        const quickCreditBtn = event.target.closest("[data-quick-credit]");
+        if (quickCreditBtn) {
+            const studentId = quickCreditBtn.dataset.studentId;
+            const creditAmount = Number(quickCreditBtn.dataset.quickCredit || 0);
+            if (!studentId || creditAmount <= 0) return;
+            const student = state.studentCache.get(studentId) || {};
+            const currentBalance = Number(student.balance || 0);
+            const newBalance = currentBalance + creditAmount;
+            const lessonPrice = Number(student.lessonPrice) > 0 ? Number(student.lessonPrice) : 15;
+
+            withButtonLoading(quickCreditBtn, "Adding...", async () => {
+                await saveStudentFinance(studentId, newBalance, lessonPrice, {
+                    courseAccess: student.courseAccess === true,
+                    accessType: student.accessType || "manual",
+                    paymentStatus: "approved",
+                    paymentNote: `Added +$${creditAmount} credit (Previous: $${currentBalance})`,
+                    courseAccessRequested: false,
+                });
+                await refreshTeacherStudents();
+                setStatus(els.teacherStudentsMsg, `Added +$${creditAmount} to ${student.name || "student"}'s balance (New balance: $${newBalance.toFixed(2)}).`, "success");
+            }).catch((error) => {
+                setStatus(els.teacherStudentsMsg, error.message || "Could not update balance.", "error");
+            });
+            return;
+        }
+
+        const requestReviewBtn = event.target.closest("[data-student-action='request-review']");
+        if (requestReviewBtn) {
+            const studentId = requestReviewBtn.dataset.studentId;
+            if (!studentId) return;
+            const student = state.studentCache.get(studentId) || {};
+            const lessonPrice = Number(student.lessonPrice) > 0 ? Number(student.lessonPrice) : 15;
+            withButtonLoading(requestReviewBtn, "Requesting...", async () => {
+                await saveStudentFinance(studentId, student.balance || 0, lessonPrice, {
+                    courseAccess: student.courseAccess === true,
+                    accessType: student.accessType || "none",
+                    paymentStatus: student.paymentStatus || "none",
+                    paymentNote: student.paymentNote || "",
+                    courseAccessRequested: student.courseAccessRequested === true,
+                    allowOverdraft: student.allowOverdraft === true,
+                    reviewRequested: true,
+                });
+                const emailResult = await window.sendReviewRequestViaAppsScript?.({
+                    studentId,
+                    siteUrl: `${window.location.origin}${window.location.pathname}`,
+                });
+                await refreshTeacherStudents();
+                setStatus(
+                    els.teacherStudentsMsg,
+                    emailResult?.success
+                        ? `Review request and email sent to ${student.name || student.email || "student"}.`
+                        : `Review request activated for ${student.name || student.email || "student"}, but the email was not sent.`,
+                    emailResult?.success ? "success" : "error"
+                );
+            }).catch((error) => {
+                setStatus(els.teacherStudentsMsg, error.message || "Could not request review.", "error");
+            });
+            return;
+        }
+
+        const resetTrialBtn = event.target.closest("[data-student-action='reset-trial']");
+        if (resetTrialBtn) {
+            const studentId = resetTrialBtn.dataset.studentId;
+            if (!studentId) return;
+            const student = state.studentCache.get(studentId) || {};
+            const label = student.name || student.email || "this student";
+            if (!window.confirm(`Reset the free trial for ${label}?`)) return;
+            withButtonLoading(resetTrialBtn, "Resetting...", async () => {
+                await resetStudentFreeTrial(studentId);
+                await refreshTeacherStudents();
+                setStatus(els.teacherStudentsMsg, `Free trial is available again for ${label}.`, "success");
+            }).catch((error) => {
+                setStatus(els.teacherStudentsMsg, error.message || "Could not reset the free trial.", "error");
+            });
+            return;
+        }
+
+        const markTrialUsedBtn = event.target.closest("[data-student-action='mark-trial-used']");
+        if (markTrialUsedBtn) {
+            const studentId = markTrialUsedBtn.dataset.studentId;
+            if (!studentId) return;
+            const student = state.studentCache.get(studentId) || {};
+            const label = student.name || student.email || "this student";
+            if (!window.confirm(`Mark the free trial as used for ${label}?`)) return;
+            withButtonLoading(markTrialUsedBtn, "Saving...", async () => {
+                await markStudentTrialUsed(studentId);
+                await refreshTeacherStudents();
+                setStatus(els.teacherStudentsMsg, `Free trial marked as used for ${label}.`, "success");
+            }).catch((error) => {
+                setStatus(els.teacherStudentsMsg, error.message || "Could not update free-trial status.", "error");
+            });
+            return;
+        }
+
         const deleteButton = event.target.closest("[data-student-action='delete']");
         if (!deleteButton) return;
         const item = deleteButton.closest("[data-student-id]");
@@ -2367,18 +7089,30 @@ function wireTeacherActions() {
         const studentId = item?.dataset.studentId || "";
         if (!studentId) return;
         const submitter = event.submitter;
+        const existingStudent = state.studentCache.get(studentId) || {};
+        const courseAccessChecked = !!form.querySelector("[data-student-course-access]")?.checked;
+        const allowOverdraftChecked = !!form.querySelector("[data-student-allow-overdraft]")?.checked;
         try {
             await withButtonLoading(submitter, "Saving...", async () => {
                 await saveStudentFinance(
                     studentId,
                     form.querySelector("[data-student-balance]")?.value,
-                    form.querySelector("[data-student-price]")?.value
+                    form.querySelector("[data-student-price]")?.value,
+                    {
+                        courseAccess: courseAccessChecked,
+                        accessType: form.querySelector("[data-student-access-type]")?.value || "none",
+                        paymentStatus: form.querySelector("[data-student-payment-status]")?.value || "none",
+                        paymentNote: form.querySelector("[data-student-payment-note]")?.value || "",
+                        courseAccessRequested: !courseAccessChecked && existingStudent.courseAccessRequested === true,
+                        allowOverdraft: allowOverdraftChecked,
+                        reviewRequested: existingStudent.reviewRequested === true,
+                    }
                 );
                 await refreshTeacherStudents();
             });
-            setStatus(els.teacherStudentsMsg, "Student balance saved.", "success");
+            setStatus(els.teacherStudentsMsg, "Student settings saved.", "success");
         } catch (error) {
-            setStatus(els.teacherStudentsMsg, error.message || "Could not save student balance.", "error");
+            setStatus(els.teacherStudentsMsg, error.message || "Could not save student settings.", "error");
         }
     });
 
@@ -2408,6 +7142,7 @@ function wireTeacherActions() {
         const action = button.getAttribute("data-action");
         const teacherBookingLoadingText = {
             cancel: "Canceling...",
+            "delete-canceled": "Deleting...",
             reschedule: "Loading times...",
             "confirm-reschedule": "Rescheduling...",
         };
@@ -2421,13 +7156,54 @@ function wireTeacherActions() {
                     await waitForLoadingPaint();
                 }
             }
+            if (action === "classroom") {
+                openClassroomDirectly({ ...booking, id: bookingId });
+                return;
+            }
+
+            if (action === "whatsapp-reminder") {
+                sendWhatsAppReminder({ ...booking, id: bookingId });
+                return;
+            }
+
+            if (action === "complete") {
+                await markBookingCompleted(bookingId, booking);
+                setStatus(els.teacherBookingMsg, "Lesson marked as completed! Hours taught incremented (+1).", "success");
+                await refreshTeacherBookings();
+                return;
+            }
+
             if (action === "cancel") {
-                const deleteResult = await deleteCalendarEventForBooking(bookingId, booking);
-                if (deleteResult?.success === false && !isAlreadyDeletedCalendarEvent(deleteResult)) {
-                    throw new Error(normalizeAppsScriptStudentError(deleteResult, "Could not remove this booking from Google Calendar."));
-                }
                 await cancelBooking({ db: window.db, firebase: window.firebase, bookingId });
-                setStatus(els.teacherBookingMsg, "Booking canceled.", "success");
+                const deleteResult = await deleteCalendarEventForBooking(bookingId, booking);
+                const calendarDeletePending = deleteResult?.success === false && !isAlreadyDeletedCalendarEvent(deleteResult);
+                if (!calendarDeletePending) {
+                    await window.db.collection("bookings").doc(bookingId).set({
+                        calendarDeletePending: false,
+                        updatedAt: Date.now(),
+                    }, { merge: true });
+                }
+                setStatus(
+                    els.teacherBookingMsg,
+                    calendarDeletePending
+                        ? "Booking canceled. Calendar removal will be retried."
+                        : "Booking canceled.",
+                    "success"
+                );
+                await refreshTeacherBookings();
+                await renderBookingCalendar();
+                return;
+            }
+
+            if (action === "delete-canceled") {
+                if (booking.status !== "canceled") {
+                    throw new Error("Only canceled bookings can be deleted.");
+                }
+                const confirmed = window.confirm("Permanently delete this canceled booking? This cannot be undone.");
+                if (!confirmed) return;
+                await deleteCanceledBooking({ db: window.db, bookingId });
+                state.bookingCache.delete(bookingId);
+                setStatus(els.teacherBookingMsg, "Canceled booking deleted permanently.", "success");
                 await refreshTeacherBookings();
                 await renderBookingCalendar();
                 return;
@@ -2462,28 +7238,7 @@ function wireTeacherActions() {
                     setStatus(els.teacherBookingMsg, "Choose a future time.", "error");
                     return;
                 }
-                const conflict = await findBookingConflict(newSlot, bookingDeps(), { excludeBookingId: bookingId });
-                if (conflict) {
-                    setStatus(els.teacherBookingMsg, "That slot is already taken.", "error");
-                    return;
-                }
-                const deleteResult = await deleteCalendarEventForBooking(bookingId, booking);
-                if (deleteResult?.success === false && !isAlreadyDeletedCalendarEvent(deleteResult)) {
-                    throw new Error(normalizeAppsScriptStudentError(deleteResult, "Could not remove the old Google Calendar event."));
-                }
-                const createResult = await createCalendarEventForBooking(bookingId, booking, newSlot);
-                if (createResult?.success === false) {
-                    throw new Error(createResult.message || "Could not create the new Google Calendar event.");
-                }
-                await rescheduleBooking({
-                    db: window.db,
-                    firebase: window.firebase,
-                    bookingId,
-                    booking,
-                    newSlot,
-                    calendarSynced: !!createResult?.success,
-                    googleCalendarEventId: createResult?.eventId || null,
-                });
+                await rescheduleTeacherBooking(bookingId, booking, newSlot);
                 setStatus(els.teacherBookingMsg, "Booking rescheduled.", "success");
                 await refreshTeacherBookings();
                 await renderBookingCalendar();
@@ -2550,6 +7305,22 @@ function wireTeacherActions() {
             setStatus(els.googleCalendarStatus, error.message || "Could not save Preply calendar ID.", "error");
         });
     });
+
+    const teacherDashboardEl = document.getElementById("teacherDashboard");
+    if (teacherDashboardEl) {
+        teacherDashboardEl.addEventListener("click", (event) => {
+            const tabBtn = event.target.closest("[data-teacher-tab]");
+            if (tabBtn && tabBtn.dataset.teacherTab) {
+                switchTeacherTab(tabBtn.dataset.teacherTab);
+                return;
+            }
+            const gotoBtn = event.target.closest("[data-goto-tab]");
+            if (gotoBtn && gotoBtn.dataset.gotoTab) {
+                switchTeacherTab(gotoBtn.dataset.gotoTab);
+                return;
+            }
+        });
+    }
 }
 
 function showScreen(screenId) {
@@ -2566,17 +7337,22 @@ function showScreen(screenId) {
     if (screenId === "student-screen") {
         withAppLoading("Loading available times...", () => ensureBookingCalendarLoaded()).catch(console.error);
         startGoogleBusyAutoRefresh();
+    } else {
+        stopGoogleBusyAutoRefresh();
     }
 }
 
 async function handleAuthState(user) {
     stopStudentProfileListener();
+    stopStudentBookingsListener();
     stopBalanceReconcileAutoRefresh();
+    stopTeacherLessonFeedbackListener();
     state.currentUser = user || null;
     state.currentRole = "";
     state.studentProfile = null;
     state.teacherUser = null;
     state.teacherRole = "";
+    state.googleCalendarConnected = false;
     state.publicSettingsLoaded = false;
     state.bookingCalendarLoaded = false;
     state.publicSettingsInFlight = null;
@@ -2584,6 +7360,24 @@ async function handleAuthState(user) {
     state.busyBlocksRangeDays = 0;
 
     if (!user) {
+        if (upcomingBannerInterval) {
+            clearInterval(upcomingBannerInterval);
+            upcomingBannerInterval = null;
+        }
+        if (teacherUpcomingBannerInterval) {
+            clearInterval(teacherUpcomingBannerInterval);
+            teacherUpcomingBannerInterval = null;
+        }
+        const bannerEl = document.getElementById("upcomingLessonBanner");
+        if (bannerEl) {
+            bannerEl.style.display = "none";
+            bannerEl.innerHTML = "";
+        }
+        const teacherBannerEl = document.getElementById("teacherUpcomingLessonBanner");
+        if (teacherBannerEl) {
+            teacherBannerEl.style.display = "none";
+            teacherBannerEl.innerHTML = "";
+        }
         if (els.teacherDashboard) els.teacherDashboard.hidden = true;
         if (els.teacherAuthBadge) els.teacherAuthBadge.textContent = "Signed out";
         setStatus(els.teacherAuthMsg, "Sign in to access teacher controls.");
@@ -2609,8 +7403,10 @@ async function handleAuthState(user) {
         setStatus(els.teacherAuthMsg, "Sign in to access teacher controls.");
         setStatus(els.teacherLoginMsg, "");
         updateStudentAuthUi();
+        syncStudentReviewUi();
         showScreen("student-screen");
         startStudentProfileListener();
+        startStudentBookingsListener();
         await Promise.all([
             loadStudentBookings(),
             ensureBookingCalendarLoaded(),
@@ -2620,31 +7416,103 @@ async function handleAuthState(user) {
 
     state.teacherUser = user;
     state.teacherRole = "teacher";
+    if (upcomingBannerInterval) {
+        clearInterval(upcomingBannerInterval);
+        upcomingBannerInterval = null;
+    }
+    const bannerEl = document.getElementById("upcomingLessonBanner");
+    if (bannerEl) {
+        bannerEl.style.display = "none";
+        bannerEl.innerHTML = "";
+    }
     updateStudentAuthUi();
 
-    await bootstrapTeacherAccess({
+    bootstrapTeacherAccess({
         db: window.db,
         firebase: window.firebase,
         uid: user.uid,
         email: user.email,
-    });
+    }).catch((error) => console.warn("Could not refresh teacher access documents.", error));
 
+    if (!els.teacherDashboard) {
+        console.warn("Teacher dashboard markup is missing; skipping teacher UI render.");
+        return;
+    }
     els.teacherDashboard.hidden = false;
-    els.teacherAuthBadge.textContent = user.email || "Teacher";
+    switchTeacherTab(state.activeTeacherTab || "tab-home");
+    if (els.teacherAuthBadge) els.teacherAuthBadge.textContent = user.email || "Teacher";
     setStatus(els.teacherAuthMsg, "Teacher access active.", "success");
     setStatus(els.teacherLoginMsg, "");
     els.teacherLoginModal?.classList.remove("modal--open");
 
-    const teacherDoc = await window.db.collection("teachers").doc(user.uid).get();
-    const teacherData = teacherDoc.exists ? (teacherDoc.data() || {}) : {};
-    if (els.teacherAppsScriptUrl) els.teacherAppsScriptUrl.value = teacherData.appsScript?.webAppUrl || "";
-    if (els.teacherPreplyCalendarId) {
-        els.teacherPreplyCalendarId.value = teacherData.preplyCalendarId || teacherData.googleCalendar?.preplyCalendarId || "";
-    }
-    await refreshTeacherDashboard();
-    startBalanceReconcileAutoRefresh();
-    refreshAppsScriptEmailQuota().catch(console.error);
     showScreen("teacher-screen");
+    refreshGoogleCalendarStatus().catch((error) => {
+        console.warn("Could not refresh Google Calendar connection status.", error);
+    });
+    if (els.teacherLessonFeedbackCount) {
+        els.teacherLessonFeedbackCount.textContent = `${LESSON_FEEDBACK_BASELINE.studentCount} students · 0 new lesson ratings`;
+    }
+    renderLessonFeedbackMetricCards(els.teacherLessonFeedbackMetrics, {
+        count: LESSON_FEEDBACK_BASELINE.studentCount,
+        studentCount: LESSON_FEEDBACK_BASELINE.studentCount,
+        lessonCount: 0,
+        averages: LESSON_FEEDBACK_BASELINE.averages,
+    });
+    startTeacherLessonFeedbackListener();
+
+    window.db.collection("teachers").doc(user.uid).get().then((teacherDoc) => {
+        const teacherData = teacherDoc.exists ? (teacherDoc.data() || {}) : {};
+        renderPreplyStatisticsSummary(teacherData.calendarStatistics || {});
+        if (els.teacherAppsScriptUrl) els.teacherAppsScriptUrl.value = teacherData.appsScript?.webAppUrl || "";
+        if (els.teacherPreplyCalendarId) {
+            els.teacherPreplyCalendarId.value = teacherData.preplyCalendarId || teacherData.googleCalendar?.preplyCalendarId || "";
+        }
+    }).catch((error) => console.warn("Could not load teacher integration settings.", error));
+
+    refreshTeacherDashboard().then(() => {
+        startBalanceReconcileAutoRefresh();
+    }).catch((error) => {
+        console.error("Could not refresh teacher dashboard.", error);
+        setStatus(els.teacherAuthMsg, "Teacher access active; some dashboard data could not refresh.", "error");
+    });
+    refreshAppsScriptEmailQuota().catch(console.error);
+}
+
+async function syncReviewsToCloud() {
+    if (!window.db) return;
+    try {
+        const cloudRevs = await loadCloudReviews(window.db);
+        const initialRevs = createInitialReviews();
+
+        const cleanedInitialRevs = initialRevs.map(r => {
+            return {
+                id: r.id,
+                name: (r.name || "Student").trim(),
+                country: (r.country || "🌐 Student").trim(),
+                date: (r.date || "Recent").trim(),
+                rating: Number(r.rating || 5),
+                text: (r.text || "").trim(),
+                tag: (r.tag || "Arabic Lesson").trim(),
+                avatar: (r.avatar || (r.name ? r.name.substring(0, 2).toUpperCase() : "ST")).trim(),
+                source: r.source || "",
+                createdAt: r.createdAt || Date.now()
+            };
+        });
+
+        const cloudIds = new Set((cloudRevs || []).map(r => r.id));
+        for (const r of cleanedInitialRevs) {
+            if (!cloudIds.has(r.id)) {
+                try {
+                    await addReviewToCloud(window.db, r);
+                    console.log(`[Sync] Successfully synced review ${r.id} to cloud.`);
+                } catch (err) {
+                    console.warn(`[Sync] Could not sync review ${r.id} to cloud:`, err);
+                }
+            }
+        }
+    } catch (e) {
+        console.error("[Sync] Error in automated reviews sync:", e);
+    }
 }
 
 function buildTeacherScheduleUi() {
@@ -2653,7 +7521,15 @@ function buildTeacherScheduleUi() {
 
 async function init() {
     cacheDom();
+    syncResponsiveWelcomeLayout();
+    window.addEventListener("resize", syncResponsiveWelcomeLayout);
+    initializeStudentTimezoneSelector();
     buildTeacherScheduleUi();
+    renderProfileUi();
+    renderReviewsUi();
+    updateStudentOfferUi();
+    loadPublicLessonFeedbackSummary().catch(console.error);
+    syncStudentReviewUi();
     setStudentAuthMode("login");
     updateStudentAuthUi();
     wireStudentActions();
@@ -2661,9 +7537,82 @@ async function init() {
     showScreen("welcome-screen");
 
     if (!window.db || !window.auth) {
-        setStatus(els.bookingMsg, "Firebase runtime config is missing. Add js/config.runtime.js first.", "error");
+        setStatus(els.bookingMsg, "Firebase config is missing. Check js/config.js.", "error");
         return;
     }
+
+    loadPublicSettings({ force: true }).catch((error) => {
+        console.warn("Could not load public lesson packages.", error);
+        updateStudentOfferUi();
+    });
+
+    if (new URLSearchParams(window.location.search).get("teacher") === "1") {
+        els.teacherLoginModal?.classList.add("modal--open");
+    }
+
+    loadCloudProfileSettings(window.db, createInitialProfileSettings()).then((cloudProf) => {
+        if (cloudProf) {
+            // Refresh an empty or obsolete generic profile bio without importing another teacher's identity.
+            if (!cloudProf.bioText ||
+                cloudProf.bioText.includes("Modern Standard Arabic (MSA)") ||
+                cloudProf.bioText.includes("I’m a Palestinian Arabic tutor specializing")) {
+                const updatedDefault = createInitialProfileSettings();
+                cloudProf = {
+                    ...cloudProf,
+                    bioText: updatedDefault.bioText,
+                    quoteArabic: updatedDefault.quoteArabic,
+                    headline: updatedDefault.headline
+                };
+                saveCloudProfileSettings(window.db, cloudProf).catch(console.error);
+            }
+            state.profileSettings = cloudProf;
+            saveLocalProfileSettings("teacher_profile_v1", cloudProf);
+            renderProfileUi();
+        }
+    }).catch(console.error);
+
+    loadCloudReviews(window.db).then(async (cloudRevs) => {
+        const initialRevs = createInitialReviews();
+
+        // Clean and validate reviews
+        const cleanedInitialRevs = initialRevs.map(r => {
+            return {
+                id: r.id,
+                name: (r.name || "Student").trim(),
+                country: (r.country || "🌐 Student").trim(),
+                date: (r.date || "Recent").trim(),
+                rating: Number(r.rating || 5),
+                text: (r.text || "").trim(),
+                tag: (r.tag || "Arabic Lesson").trim(),
+                avatar: (r.avatar || (r.name ? r.name.substring(0, 2).toUpperCase() : "ST")).trim(),
+                source: r.source || "",
+                createdAt: r.createdAt || Date.now()
+            };
+        });
+
+        // Filter out old Preply reviews
+        let filteredRevs = (cloudRevs || []).filter(r => !["rev-preply-1", "rev-preply-2", "rev-preply-3"].includes(r.id));
+
+        const cloudIds = new Set(filteredRevs.map(r => r.id));
+        for (const r of cleanedInitialRevs) {
+            if (!cloudIds.has(r.id)) {
+                filteredRevs.push(r);
+            }
+        }
+
+        filteredRevs.sort((a, b) => {
+            const indexA = cleanedInitialRevs.findIndex(ir => ir.id === a.id);
+            const indexB = cleanedInitialRevs.findIndex(ir => ir.id === b.id);
+            if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+            if (indexA !== -1) return -1;
+            if (indexB !== -1) return 1;
+            return (b.createdAt || 0) - (a.createdAt || 0);
+        });
+
+        state.reviews = filteredRevs;
+        saveLocalReviews("teacher_reviews_v1", filteredRevs);
+        renderReviewsUi();
+    }).catch(console.error);
 
     window.auth.onAuthStateChanged((user) => {
         withAppLoading("Loading account...", () => handleAuthState(user)).catch(console.error);

@@ -3,6 +3,7 @@ export function createInitialContactSettings() {
         whatsapp: "",
         email: "",
         sitePrice: "",
+        classroomMeetingUrl: "",
     };
 }
 
@@ -47,6 +48,7 @@ export async function loadContactSettingsFromCloud(db, currentSettings) {
                     whatsapp: typeof data.whatsapp === "string" ? data.whatsapp : currentSettings.whatsapp,
                     email: typeof data.email === "string" ? data.email : currentSettings.email,
                     sitePrice: typeof data.sitePrice === "string" ? data.sitePrice : currentSettings.sitePrice,
+                    classroomMeetingUrl: typeof data.classroomMeetingUrl === "string" ? data.classroomMeetingUrl : currentSettings.classroomMeetingUrl,
                 };
             }
         }
@@ -59,6 +61,7 @@ export async function loadContactSettingsFromCloud(db, currentSettings) {
                 whatsapp: typeof data.whatsapp === "string" ? data.whatsapp : currentSettings.whatsapp,
                 email: typeof data.contactEmail === "string" ? data.contactEmail : currentSettings.email,
                 sitePrice: typeof data.sitePrice === "string" ? data.sitePrice : currentSettings.sitePrice,
+                classroomMeetingUrl: typeof data.classroomMeetingUrl === "string" ? data.classroomMeetingUrl : currentSettings.classroomMeetingUrl,
             };
         }
     } catch {}
@@ -76,6 +79,7 @@ export async function saveContactSettingsToCloud(db, firebase, settings) {
                         whatsapp: settings?.whatsapp || "",
                         email: settings?.email || "",
                         sitePrice: settings?.sitePrice || "",
+                        classroomMeetingUrl: settings?.classroomMeetingUrl || "",
                         updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
                     },
                 },
@@ -89,6 +93,7 @@ export async function saveContactSettingsToCloud(db, firebase, settings) {
                 whatsapp: settings?.whatsapp || "",
                 contactEmail: settings?.email || "",
                 sitePrice: settings?.sitePrice || "",
+                classroomMeetingUrl: settings?.classroomMeetingUrl || "",
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
             },
             { merge: true }
@@ -114,8 +119,18 @@ export function buildWhatsAppUrl(settings, message) {
     const raw = (settings?.whatsapp || "").trim();
     if (!raw) return null;
     if (raw.startsWith("http")) {
-        const sep = raw.includes("?") ? "&" : "?";
-        return `${raw}${sep}text=${encodeURIComponent(message)}`;
+        try {
+            const url = new URL(raw);
+            const hostname = url.hostname.toLowerCase();
+            const isWhatsAppHost = hostname === "wa.me"
+                || hostname === "api.whatsapp.com"
+                || hostname === "web.whatsapp.com";
+            if (!isWhatsAppHost) return null;
+            url.searchParams.set("text", message);
+            return url.toString();
+        } catch {
+            return null;
+        }
     }
     const number = extractWhatsAppNumber(settings);
     if (!number) return null;

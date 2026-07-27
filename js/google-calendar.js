@@ -4,7 +4,6 @@ let tokenClient;
 let gapiInited = false;
 let gisInited = false;
 let accessToken = null;
-let refreshToken = null;
 let calendarId = 'primary';
 const errorHandler = {
     withTimeout(asyncFn, timeoutMs = 10000, timeoutMessage = "Google Calendar initialization timed out.") {
@@ -98,7 +97,6 @@ function isGoogleAuthError(error) {
 
 async function clearStoredGoogleCalendarConnection(reason = "Google Calendar session expired. Please reconnect.") {
     accessToken = null;
-    refreshToken = null;
 
     try {
         const user = firebase.auth().currentUser;
@@ -107,7 +105,6 @@ async function clearStoredGoogleCalendarConnection(reason = "Google Calendar ses
                 googleCalendar: {
                     connected: false,
                     accessToken: null,
-                    refreshToken: null,
                     updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                 }
             }, { merge: true });
@@ -220,8 +217,7 @@ function requestGoogleAccessToken(prompt = '') {
             }
             try {
                 accessToken = resp.access_token || accessToken || null;
-                refreshToken = resp.refresh_token || refreshToken || null;
-                resolve({ accessToken, refreshToken, response: resp });
+                resolve({ accessToken, response: resp });
             } catch (err) {
                 reject(err);
             }
@@ -241,7 +237,6 @@ async function ensureGoogleCalendarAccess({ interactive = false } = {}) {
     }
 
     accessToken = teacher.teacherData.googleCalendar.accessToken || accessToken;
-    refreshToken = teacher.teacherData.googleCalendar.refreshToken || refreshToken;
     window.preplyCalendarId = normalizeCalendarId(teacher.teacherData.preplyCalendarId || teacher.teacherData.googleCalendar?.preplyCalendarId || window.preplyCalendarId);
 
     if (!interactive && accessToken) {
@@ -252,7 +247,7 @@ async function ensureGoogleCalendarAccess({ interactive = false } = {}) {
         if (!interactive) {
             return null;
         }
-        const tokenResult = await requestGoogleAccessToken('consent');
+        const tokenResult = await requestGoogleAccessToken('');
         if (tokenResult?.accessToken) {
             await firebase.firestore().collection('teachers').doc(teacher.user.uid).set({
                 googleCalendar: {
@@ -370,7 +365,7 @@ async function connectToGoogleCalendar(callback) {
             const ok = await errorHandler.withTimeout(
                 () => initializeGoogleCalendar(),
                 10000,
-                'فشل تهيئة Google Calendar API - انتهت المهلة'
+                'Failed to initialize Google Calendar API - Timeout'
             );
             console.log("Google Calendar API initialized successfully");
         } catch (error) {
@@ -392,7 +387,6 @@ async function connectToGoogleCalendar(callback) {
             googleCalendar: {
                 connected: true,
                 accessToken: tokenResult.accessToken,
-                refreshToken: tokenResult.refreshToken || null,
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
             }
         }, { merge: true });
@@ -415,7 +409,6 @@ async function disconnectFromGoogleCalendar() {
                 googleCalendar: {
                     connected: false,
                     accessToken: null,
-                    refreshToken: null,
                     updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                 }
             }, { merge: true });
@@ -487,7 +480,6 @@ async function getGoogleCalendarEvents(startDate, endDate) {
         
         console.log("Using access token for teacher:", teacher.teacherDoc.id);
         console.log("Access token:", accessToken ? "Found" : "Not found");
-        console.log("Refresh token:", refreshToken ? "Found" : "Not found");
 
         // Get events from primary calendar
         const response = await googleCalendarApiRequest({
@@ -528,9 +520,10 @@ async function getGoogleCalendarEvents(startDate, endDate) {
     } catch (error) {
         if (isGoogleAuthError(error)) {
             await clearStoredGoogleCalendarConnection();
+            throw new Error("Google Calendar authorization expired. Click Connect Google Calendar, then import again.");
         }
         console.error('Error getting Google Calendar events:', error);
-        return [];
+        throw error;
     }
 }
 
@@ -558,7 +551,9 @@ window.importGoogleCalendarEventsToBusyBlocks = async function importGoogleCalen
             return { success: false, message: "Google Calendar not connected" };
         }
 
-        const token = await ensureGoogleCalendarAccess({ interactive: false });
+        // Google Identity Services does not issue browser refresh tokens. Request
+        // a current access token when the teacher explicitly starts an import.
+        const token = await ensureGoogleCalendarAccess({ interactive: true });
         if (!token) {
             return { success: false, message: "Reconnect Google Calendar to import events." };
         }
@@ -571,15 +566,14 @@ window.importGoogleCalendarEventsToBusyBlocks = async function importGoogleCalen
         const events = await getGoogleCalendarEvents(startDate, endDate);
         console.log(`Found ${events.length} events in Google Calendar`);
         
-        if (events.length === 0) {
-            return { success: true, message: window.preplyCalendarId ? "No events found in Google or Preply calendars." : "No events found. Add your Preply calendar ID if needed." };
-        }
-        
         const bookingRef = firebase.firestore().collection("teachers").doc(user.uid);
         const bookingSnap = await bookingRef.get();
         const bookingData = bookingSnap.exists ? (bookingSnap.data() || {}) : {};
         const teacherBookingSettings = bookingData.bookingSettings || {};
-        const exceptions = Array.isArray(teacherBookingSettings.exceptions) ? teacherBookingSettings.exceptions : [];
+        const existingExceptions = Array.isArray(teacherBookingSettings.exceptions) ? teacherBookingSettings.exceptions : [];
+        // Imported calendar blocks are a mirror, not permanent manual exceptions.
+        // Rebuild that part of the list so deleted/cancelled Google events become available again.
+        const exceptions = existingExceptions.filter((block) => block?.source !== "googleCalendar");
         
         let addedCount = 0;
         let skippedCount = 0;
@@ -608,7 +602,9 @@ window.importGoogleCalendarEventsToBusyBlocks = async function importGoogleCalen
                     date: dateStr,
                     start: startStr,
                     end: endStr,
-                    note: event.summary || 'Google Calendar Event'
+                    note: event.summary || 'Google Calendar Event',
+                    source: 'googleCalendar',
+                    sourceEventId: event.id || ''
                 });
                 addedCount++;
             } else {
@@ -616,13 +612,23 @@ window.importGoogleCalendarEventsToBusyBlocks = async function importGoogleCalen
             }
         }
         
-        await bookingRef.set({ bookingSettings: { ...teacherBookingSettings, exceptions } }, { merge: true });
-        window.bookingSettings = { ...window.bookingSettings, exceptions };
+        const syncTime = Date.now();
+        const nextBookingSettings = { ...teacherBookingSettings, exceptions, lastGoogleSync: syncTime };
+        await Promise.all([
+            bookingRef.set({ bookingSettings: nextBookingSettings }, { merge: true }),
+            firebase.firestore().collection("bookingSettings").doc("primary").set({
+                exceptions,
+                updatedAt: syncTime
+            }, { merge: true })
+        ]);
+        window.bookingSettings = { ...window.bookingSettings, exceptions, lastGoogleSync: syncTime };
         
         console.log(`Imported ${addedCount} events, skipped ${skippedCount} existing events`);
         return { 
             success: true, 
-            message: `Imported ${addedCount} events to busy blocks${window.preplyCalendarId ? " (including Preply calendar)" : ""}.`,
+            message: events.length
+                ? `Synced ${addedCount} current calendar events${window.preplyCalendarId ? " (including Preply calendar)" : ""}.`
+                : "Calendar sync is current; removed old imported busy blocks.",
             addedCount,
             skippedCount
         };

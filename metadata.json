@@ -1,0 +1,8 @@
+{
+  "name": "Lesson Booking Studio",
+  "description": "Lesson booking application with student/teacher logins, schedule management, and calendar sync.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

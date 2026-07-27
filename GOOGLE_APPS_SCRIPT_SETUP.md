@@ -44,9 +44,6 @@ In Apps Script:
 `FIREBASE_TEACHER_EMAIL`
 : the teacher login email.
 
-`FIREBASE_TEACHER_PASSWORD`
-: the teacher login password. Apps Script uses this only to sign in to Firebase and deduct balances in the background.
-
 ## 3. Deploy as Web App
 
 1. Click `Deploy`
@@ -66,7 +63,6 @@ In your site:
 4. Click `Test Apps Script`
 5. Click `Import Busy via Apps Script`
 6. Create the reminder trigger manually in Apps Script to send student reminder emails about 15 minutes before each lesson
-7. Create the balance deduction trigger manually in Apps Script so balances are deducted even when the teacher dashboard is closed
 
 After changing `apps-script/booking-sync.gs`, create a new Apps Script deployment version, then keep the same Web App URL in the dashboard unless Google gives you a new one.
 
@@ -93,36 +89,9 @@ If Google shows a permission error for `ScriptApp.getProjectTriggers`, ignore th
 
 The script stores sent reminder markers in Apps Script properties so the same booking does not receive duplicate reminder emails.
 
-## 6. Automatic Balance Deductions
+## 6. Balance Deductions
 
-The script can deduct student balances in the background without the teacher dashboard being open.
-
-It charges:
-
-- Completed lessons after the lesson time has passed.
-- Student cancellations inside the 12-hour window.
-
-It does not charge:
-
-- Teacher cancellations.
-- Lessons that were already charged.
-- Lessons where the student has no lesson price set.
-
-To enable it:
-
-1. Add the Firebase script properties listed above.
-2. Deploy the latest `apps-script/booking-sync.gs`.
-3. In Apps Script, open `Triggers` from the left sidebar.
-4. Click `Add Trigger`.
-5. Choose function: `reconcileStudentBalancesFromFirestore`.
-6. Event source: `Time-driven`.
-7. Type: `Minutes timer`.
-8. Interval: `Every 5 minutes`.
-9. Save and approve Google permissions.
-
-To test manually, open the teacher dashboard and click `Check Balance Deductions`.
-
-Important: if you change the teacher password in Firebase, update `FIREBASE_TEACHER_PASSWORD` in Apps Script properties too.
+Balance reconciliation runs from the authenticated teacher dashboard. There is no Apps Script balance trigger, and no Firebase teacher password should be stored in Script Properties.
 
 ## 7. Optional
 
