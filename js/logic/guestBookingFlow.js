@@ -1,5 +1,6 @@
 import {
     isSlotBeyondMinimumLead,
+    invalidateBookedSlotsCache,
 } from "./bookingAvailability.js";
 
 export async function submitGuestBooking({
@@ -211,6 +212,16 @@ export async function submitGuestBooking({
             await batch.commit();
         }
 
+        // The availability query is cached to reduce Firestore reads. Invalidate
+        // it as soon as this atomic booking write succeeds so the selected time
+        // disappears immediately, before Calendar/email synchronization finishes.
+        invalidateBookedSlotsCache();
+        try {
+            await buildBookingSelects();
+        } catch (availabilityError) {
+            console.warn("Booking was saved, but the availability UI could not refresh immediately.", availabilityError);
+        }
+
         const appsScriptSync = await createBookingViaAppsScript?.({
             bookingId: bookingRef.id,
             slot: selectedSlot,
@@ -303,6 +314,7 @@ export async function submitGuestBooking({
                     updatedAt: canceledAt,
                 }, { merge: true });
                 await cancelBatch.commit();
+                invalidateBookedSlotsCache();
                 if (bookingMsg) {
                     bookingMsg.textContent = "That time was just taken. Please choose another lesson time.";
                 }
@@ -387,7 +399,6 @@ export async function submitGuestBooking({
         if (!isLocalDevHost() && window.grecaptcha && typeof window.grecaptcha.reset === "function") {
             window.grecaptcha.reset();
         }
-        await buildBookingSelects();
     } catch (err) {
         console.error("Booking failed with error:", err);
         const permissionDenied = ["permission-denied", "firestore/permission-denied"]

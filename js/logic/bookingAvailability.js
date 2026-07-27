@@ -111,6 +111,10 @@ export function isSlotBlockedByException(slotStartMs, slotMinutes, { bookingSett
 const bookedSlotsCache = new Map();
 const BOOKED_SLOTS_CACHE_MS = 60000;
 
+export function invalidateBookedSlotsCache() {
+    bookedSlotsCache.clear();
+}
+
 export async function getBookedSlotsMap(startMs, endMs, { db, bookingSettings }) {
     const cacheKey = `${startMs}:${endMs}:${bookingSettings.totalSlotMinutes || bookingSettings.slotMinutes || 50}`;
     const cached = bookedSlotsCache.get(cacheKey);

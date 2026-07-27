@@ -11,7 +11,7 @@ import {
 } from "./logic/contactSettingsStore.js";
 import {
     submitGuestBooking,
-} from "./logic/guestBookingFlow.js?v=20260725-firestore-sync-v3";
+} from "./logic/guestBookingFlow.js?v=20260727-availability-refresh-v4";
 import {
     renderTeacherBookings,
     cancelBooking,
