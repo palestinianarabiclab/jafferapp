@@ -827,7 +827,9 @@ function updateCourseAccessRequestUi() {
     const signedIn = isStudentSignedIn();
     const studentProfile = state.studentProfile || {};
     const balance = Number(studentProfile.balance || 0);
-    const requested = studentProfile.courseAccessRequested === true || studentProfile.paymentStatus === "pending";
+    const requested = (studentProfile.courseAccessRequested === true || studentProfile.paymentStatus === "pending")
+        && Number(studentProfile.requestedAmount || 0) > 0
+        && Number(studentProfile.requestedLessons || 0) > 0;
     const requestedPkg = studentProfile.requestedPackage || "Lesson Package";
 
     const requestBtn = document.getElementById("requestCourseAccessBtn");
@@ -3472,6 +3474,10 @@ function wireStudentActions() {
         if (els.studentPaypalLink) els.studentPaypalLink.disabled = true;
         const selectionMsg = document.getElementById("paymentPackageSelectionMsg");
         if (selectionMsg) selectionMsg.textContent = "Choose a package to continue.";
+        const packageStep = document.getElementById("studentPaymentPackageStep");
+        const warningStep = document.getElementById("studentPaymentWarningStep");
+        if (packageStep) packageStep.hidden = false;
+        if (warningStep) warningStep.hidden = true;
         els.studentPaymentCard.hidden = false;
         window.setTimeout(() => els.studentPaymentCloseBtn?.focus(), 0);
     });
@@ -4362,8 +4368,9 @@ function wireStudentActions() {
             c.classList.toggle("is-selected", matches);
         });
 
-        const lessons = Number(card.dataset.packageLessons || 10);
-        const price = Number(card.dataset.packagePrice || 135);
+        const lessons = Number(card.dataset.packageLessons || 0);
+        const price = Number(card.dataset.packagePrice || 0);
+        if (!(lessons > 0) || !(price > 0)) return;
         const label = card.dataset.packageLabel || `${lessons} Lessons ($${price})`;
 
         state.selectedPackage = { lessons, price, label };
@@ -4378,8 +4385,23 @@ function wireStudentActions() {
     document.getElementById("packagesGrid")?.addEventListener("click", selectPaymentPackage);
     document.getElementById("paymentPackagesGrid")?.addEventListener("click", selectPaymentPackage);
 
-    els.studentPaypalLink?.addEventListener("click", async () => {
+    els.studentPaypalLink?.addEventListener("click", () => {
         if (!state.selectedPackage || !els.studentPaypalLink.dataset.paypalBase) return;
+        const packageStep = document.getElementById("studentPaymentPackageStep");
+        const warningStep = document.getElementById("studentPaymentWarningStep");
+        if (packageStep) packageStep.hidden = true;
+        if (warningStep) warningStep.hidden = false;
+    });
+
+    document.getElementById("studentPaymentBackBtn")?.addEventListener("click", () => {
+        const packageStep = document.getElementById("studentPaymentPackageStep");
+        const warningStep = document.getElementById("studentPaymentWarningStep");
+        if (packageStep) packageStep.hidden = false;
+        if (warningStep) warningStep.hidden = true;
+    });
+
+    document.getElementById("studentPaypalContinueBtn")?.addEventListener("click", async () => {
+        if (!state.selectedPackage || !els.studentPaypalLink?.dataset.paypalBase) return;
         const paymentTab = window.open("about:blank", "_blank");
         if (!paymentTab) {
             window.alert("Allow pop-ups for this site, then click Open PayPal again.");
@@ -4632,6 +4654,19 @@ async function saveCourseOffers() {
         updatedAt: Date.now(),
     };
     await saveTeacherSettings();
+    const studentsSnap = await window.db.collection("users").where("role", "==", "student").get();
+    const studentDocs = studentsSnap.docs || [];
+    for (let offset = 0; offset < studentDocs.length; offset += 400) {
+        const batch = window.db.batch();
+        studentDocs.slice(offset, offset + 400).forEach((doc) => {
+            batch.set(doc.ref, {
+                lessonPrice: state.bookingSettings.courseOffers.courseAccessPrice,
+                financeUpdatedAt: Date.now(),
+                updatedAt: window.firebase.firestore.FieldValue.serverTimestamp(),
+            }, { merge: true });
+        });
+        await batch.commit();
+    }
     updateStudentOfferUi();
     setStatus(els.courseOffersMsg, "Course offers saved.", "success");
 }
@@ -6035,7 +6070,9 @@ async function refreshTeacherStudents() {
             const lessonPrice = toMoneyValue(student.lessonPrice);
             const courseAccess = student.courseAccess === true;
             const accessLabel = courseAccess ? "Course: unlocked" : "Course: locked";
-            const accessRequested = student.courseAccessRequested === true || student.paymentStatus === "pending";
+            const accessRequested = (student.courseAccessRequested === true || student.paymentStatus === "pending")
+                && Number(student.requestedAmount || 0) > 0
+                && Number(student.requestedLessons || 0) > 0;
             const requestLabel = accessRequested && !courseAccess ? " | Access requested" : "";
             const requestedPkg = student.requestedPackage || "Lesson Package";
             const requestedAmt = Number(student.requestedAmount || 0);

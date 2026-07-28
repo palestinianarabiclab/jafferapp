@@ -422,10 +422,6 @@
                         </button>
                         <p id="bookingMsg" class="status-line"></p>
                     </form>
-                    <div class="student-payment-reminder" style="margin-top: 14px;">
-                        <span class="student-payment-reminder__icon" aria-hidden="true">&#128161;</span>
-                        <div><strong>PayPal reminder</strong><p>Just a quick reminder: when you choose to pay through PayPal, please choose Goods and Services. Choosing another option may affect my PayPal account.</p></div>
-                    </div>
                     <div class="student-payment-launcher student-payment-launcher--booking">
                         <button id="studentPaymentOpenBtn" type="button" class="btn btn--primary student-payment-launcher__button">
                             <span class="student-payment-launcher__icon" aria-hidden="true">P</span>
@@ -554,19 +550,24 @@
                             <p class="eyebrow">Payment Method</p>
                             <h3 id="studentPaymentTitle">Pay securely with PayPal</h3>
                             <p class="student-payment-card__intro">Use the teacher's PayPal link after confirming the offer with the teacher.</p>
-                            <div id="paymentPackagesGrid" class="packages-grid student-payment-packages"></div>
-                            <p id="paymentPackageSelectionMsg" class="small-note">Choose a package to continue.</p>
-                            <div class="student-payment-reminder">
+                            <div id="studentPaymentPackageStep">
+                                <div id="paymentPackagesGrid" class="packages-grid student-payment-packages"></div>
+                                <p id="paymentPackageSelectionMsg" class="small-note">Choose a package to continue.</p>
+                                <button id="studentPaypalLink" type="button" class="btn btn--primary student-payment-card__button" disabled>
+                                    <span>Pay Now</span><span aria-hidden="true">&rarr;</span>
+                                </button>
+                            </div>
+                            <div id="studentPaymentWarningStep" class="student-payment-warning-step" hidden>
+                            <div class="student-payment-reminder student-payment-reminder--critical">
                                 <span class="student-payment-reminder__icon" aria-hidden="true">&#128161;</span>
                                 <div>
                                     <strong>PayPal reminder</strong>
                                     <p id="studentPaypalReminder">Just a quick reminder: when you choose to pay through PayPal, please choose Goods and Services. Choosing another option may affect my PayPal account.</p>
                                 </div>
                             </div>
-                            <button id="studentPaypalLink" type="button" class="btn btn--primary student-payment-card__button" disabled>
-                                <span>Open PayPal</span>
-                                <span aria-hidden="true">&rarr;</span>
-                            </button>
+                            <button id="studentPaypalContinueBtn" type="button" class="btn btn--primary student-payment-card__button">Continue to PayPal &rarr;</button>
+                            <button id="studentPaymentBackBtn" type="button" class="btn btn--ghost student-payment-card__button">Back to packages</button>
+                            </div>
                             <small class="student-payment-card__note">Confirm the package and amount with the teacher before sending payment.</small>
                         </div>
                     </div>
@@ -1677,7 +1678,7 @@
 
     <script src="./js/firebase-bootstrap.js"></script>
 
-    <script type="module" src="./js/app.js?v=20260728-teacher-payments-v23"></script>
+    <script type="module" src="./js/app.js?v=20260728-payment-warning-v24"></script>
 </body>
 
 </html>

@@ -4474,6 +4474,13 @@ main.site-shell {
     opacity: 0.48;
 }
 
+.student-payment-warning-step[hidden] { display: none; }
+.student-payment-reminder--critical {
+    color: #991b1b;
+    background: #fef2f2;
+    border: 2px solid #ef4444;
+}
+
 .student-payment-reminder {
     display: flex;
     gap: 11px;
