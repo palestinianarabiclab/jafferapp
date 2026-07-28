@@ -726,8 +726,12 @@ function getStudentBalance() {
 }
 
 function getStudentLessonPrice() {
-    const teacherPrice = toMoneyValue(state.bookingSettings?.courseOffers?.courseAccessPrice);
-    return teacherPrice > 0 ? teacherPrice : toMoneyValue(state.studentProfile?.lessonPrice);
+    return getConfiguredLessonPrice();
+}
+
+function getConfiguredLessonPrice() {
+    const match = String(state.profileSettings?.rateText || "").replace(/,/g, "").match(/\d+(?:\.\d+)?/);
+    return match ? toMoneyValue(match[0]) : 0;
 }
 
 function updateStudentBalanceUi() {
@@ -738,7 +742,7 @@ function updateStudentBalanceUi() {
     if (!signedIn) return;
 
     const balance = getStudentBalance();
-    const configuredLessonPrice = toMoneyValue(state.bookingSettings?.courseOffers?.courseAccessPrice);
+    const configuredLessonPrice = getConfiguredLessonPrice();
     const lessonPrice = getStudentLessonPrice() > 0 ? getStudentLessonPrice() : configuredLessonPrice;
 
     if (els.studentBalanceValue) {
@@ -851,9 +855,7 @@ function updateCourseAccessRequestUi() {
             msgEl.textContent = "Sign in first to choose a package and request account credit.";
             msgEl.className = "status-line";
         } else if (balance > 0) {
-            const lessonPrice = Number(studentProfile.lessonPrice) > 0
-                ? Number(studentProfile.lessonPrice)
-                : Number(state.bookingSettings?.courseOffers?.courseAccessPrice || 0);
+            const lessonPrice = getConfiguredLessonPrice();
             const remainingLessons = Math.floor(balance / lessonPrice);
             msgEl.textContent = `Active Credit Balance: $${balance.toFixed(2)} (~${remainingLessons} lesson${remainingLessons === 1 ? "" : "s"} remaining).`;
             msgEl.className = "status-line status-line--success";
@@ -1231,8 +1233,8 @@ async function loadPublicSettings({ force = false } = {}) {
 
 function updateStudentOfferUi() {
     const offers = state.bookingSettings.courseOffers || {};
-    const lessonPrice = toMoneyValue(offers.courseAccessPrice);
-    const rateText = lessonPrice > 0 ? `Regular rate: ${formatMoney(lessonPrice)} / 50 min` : "Rate set by teacher";
+    const lessonPrice = getConfiguredLessonPrice();
+    const rateText = state.profileSettings?.rateText ? `Regular rate: ${state.profileSettings.rateText}` : "Rate set by teacher";
     const lessonRateDisplay = document.getElementById("lessonRateDisplay");
     if (lessonRateDisplay) lessonRateDisplay.textContent = rateText;
     if (els.preplyRateDisplay && !state.profileSettings?.rateText) {
@@ -2796,7 +2798,7 @@ async function createWeeklyRecurringLessons(booking, additionalCount) {
             isFreeTrial: false,
             lessonPrice: Number(booking.lessonPrice) > 0
                 ? Number(booking.lessonPrice)
-                : Number(state.bookingSettings?.courseOffers?.courseAccessPrice || 0),
+                : getConfiguredLessonPrice(),
             history: [{
                 at: createdAt,
                 action: "created_recurring",
@@ -2886,7 +2888,7 @@ async function createTeacherLessonForStudent(student, slot, durationMinutes) {
         studentUid,
         timezone,
         isFreeTrial: false,
-        lessonPrice: Number(state.bookingSettings?.courseOffers?.courseAccessPrice || 0),
+        lessonPrice: getConfiguredLessonPrice(),
         history: [{
             at: createdAt,
             action: "created_by_teacher",
@@ -4173,7 +4175,7 @@ function wireStudentActions() {
             updateStudentAccountUi();
         }
         const balance = Number(profile.balance || 0);
-        const lessonPrice = Number(state.bookingSettings?.courseOffers?.courseAccessPrice || 0);
+        const lessonPrice = getConfiguredLessonPrice();
         if (!isTrial && lessonPrice <= 0) {
             setStatus(els.bookingMsg, "The teacher must configure the lesson price before paid lessons can be booked.", "error");
             return;
@@ -4654,19 +4656,6 @@ async function saveCourseOffers() {
         updatedAt: Date.now(),
     };
     await saveTeacherSettings();
-    const studentsSnap = await window.db.collection("users").where("role", "==", "student").get();
-    const studentDocs = studentsSnap.docs || [];
-    for (let offset = 0; offset < studentDocs.length; offset += 400) {
-        const batch = window.db.batch();
-        studentDocs.slice(offset, offset + 400).forEach((doc) => {
-            batch.set(doc.ref, {
-                lessonPrice: state.bookingSettings.courseOffers.courseAccessPrice,
-                financeUpdatedAt: Date.now(),
-                updatedAt: window.firebase.firestore.FieldValue.serverTimestamp(),
-            }, { merge: true });
-        });
-        await batch.commit();
-    }
     updateStudentOfferUi();
     setStatus(els.courseOffersMsg, "Course offers saved.", "success");
 }
@@ -5863,7 +5852,7 @@ function renderProfileUi() {
             }
         }, 50);
     }
-    if (els.preplyRateDisplay) els.preplyRateDisplay.textContent = p.rateText ? `Regular rate: ${p.rateText}` : "Regular rate: $20 / 50 min";
+    if (els.preplyRateDisplay) els.preplyRateDisplay.textContent = p.rateText ? `Regular rate: ${p.rateText}` : "Rate set by teacher";
 
     if (els.preplyAvatarContainer) {
         const avatarStr = (p.avatarUrl || "").trim();
@@ -5901,6 +5890,7 @@ function renderProfileUi() {
     if (els.teacherProfileStudentsInput) els.teacherProfileStudentsInput.value = p.studentsCount || "";
     if (els.teacherProfileQuoteInput) els.teacherProfileQuoteInput.value = p.quoteArabic || "";
     if (els.teacherProfileBioInput) els.teacherProfileBioInput.value = p.bioText || "";
+    updateStudentOfferUi();
 }
 
 function getReviewTimestamp(r) {
@@ -6544,6 +6534,7 @@ function wireTeacherActions() {
                 saveLocalProfileSettings("teacher_profile_v1", updated);
                 await saveCloudProfileSettings(window.db, updated);
                 renderProfileUi();
+                updateStudentOfferUi();
                 setStatus(els.teacherProfileMsg, "Profile settings saved successfully!", "success");
             });
         } catch (error) {
@@ -7132,7 +7123,7 @@ function wireTeacherActions() {
             const student = state.studentCache.get(studentId) || {};
             const currentBalance = Number(student.balance || 0);
             const newBalance = currentBalance + creditAmount;
-            const lessonPrice = Number(state.bookingSettings?.courseOffers?.courseAccessPrice || 0);
+            const lessonPrice = getConfiguredLessonPrice();
 
             withButtonLoading(quickCreditBtn, "Adding...", async () => {
                 await saveStudentFinance(studentId, newBalance, lessonPrice, {
@@ -7165,9 +7156,7 @@ function wireTeacherActions() {
             const studentId = requestReviewBtn.dataset.studentId;
             if (!studentId) return;
             const student = state.studentCache.get(studentId) || {};
-            const lessonPrice = Number(student.lessonPrice) > 0
-                ? Number(student.lessonPrice)
-                : Number(state.bookingSettings?.courseOffers?.courseAccessPrice || 0);
+            const lessonPrice = getConfiguredLessonPrice();
             withButtonLoading(requestReviewBtn, "Requesting...", async () => {
                 await saveStudentFinance(studentId, student.balance || 0, lessonPrice, {
                     courseAccess: student.courseAccess === true,
