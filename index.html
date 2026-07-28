@@ -231,7 +231,7 @@
                                 <span class="free-pill">FREE</span>
                                 <span class="trial-label">1st Trial Lesson</span>
                             </div>
-                            <span class="regular-rate" id="lessonRateDisplay">Regular rate: $20 / 50 min</span>
+                            <span class="regular-rate" id="lessonRateDisplay">Rate set by teacher</span>
                         </div>
 
                         <!-- Lesson Packages Block in Sidebar -->
@@ -406,7 +406,7 @@
                                 <span id="studentRemainingLessonsBadge" style="display: inline-block; background: var(--primary); color: #fff; font-size: 0.82rem; font-weight: 700; padding: 2px 8px; border-radius: 12px; margin-left: 6px;">(0 lessons remaining)</span>
                             </div>
                             <div style="text-align: right;">
-                                <span id="studentLessonPriceValue" style="font-size: 0.88rem; font-weight: 600; color: var(--ink-light); display: block;">Your lesson price: $15</span>
+                                <span id="studentLessonPriceValue" style="font-size: 0.88rem; font-weight: 600; color: var(--ink-light); display: block;">Lesson price is set by the teacher</span>
                             </div>
                         </div>
                         <div id="studentTrialNotice" style="margin-top: 8px; font-size: 0.85rem; background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; padding: 6px 10px; border-radius: 6px; font-weight: 600;" hidden>
@@ -422,6 +422,10 @@
                         </button>
                         <p id="bookingMsg" class="status-line"></p>
                     </form>
+                    <div class="student-payment-reminder" style="margin-top: 14px;">
+                        <span class="student-payment-reminder__icon" aria-hidden="true">&#128161;</span>
+                        <div><strong>PayPal reminder</strong><p>Just a quick reminder: when you choose to pay through PayPal, please choose Goods and Services. Choosing another option may affect my PayPal account.</p></div>
+                    </div>
                     <div class="student-payment-launcher student-payment-launcher--booking">
                         <button id="studentPaymentOpenBtn" type="button" class="btn btn--primary student-payment-launcher__button">
                             <span class="student-payment-launcher__icon" aria-hidden="true">P</span>
@@ -550,6 +554,8 @@
                             <p class="eyebrow">Payment Method</p>
                             <h3 id="studentPaymentTitle">Pay securely with PayPal</h3>
                             <p class="student-payment-card__intro">Use the teacher's PayPal link after confirming the offer with the teacher.</p>
+                            <div id="paymentPackagesGrid" class="packages-grid student-payment-packages"></div>
+                            <p id="paymentPackageSelectionMsg" class="small-note">Choose a package to continue.</p>
                             <div class="student-payment-reminder">
                                 <span class="student-payment-reminder__icon" aria-hidden="true">&#128161;</span>
                                 <div>
@@ -557,10 +563,10 @@
                                     <p id="studentPaypalReminder">Just a quick reminder: when you choose to pay through PayPal, please choose Goods and Services. Choosing another option may affect my PayPal account.</p>
                                 </div>
                             </div>
-                            <a id="studentPaypalLink" class="btn btn--primary student-payment-card__button" href="https://paypal.me/mahmoudtafesh2007" target="_blank" rel="noopener noreferrer">
+                            <button id="studentPaypalLink" type="button" class="btn btn--primary student-payment-card__button" disabled>
                                 <span>Open PayPal</span>
                                 <span aria-hidden="true">&rarr;</span>
-                            </a>
+                            </button>
                             <small class="student-payment-card__note">Confirm the package and amount with the teacher before sending payment.</small>
                         </div>
                     </div>
@@ -1092,7 +1098,7 @@
                         <form id="courseOffersForm" class="form-stack">
                             <div class="inline-fields">
                                 <label class="field">
-                                    <span>Course Price (USD)</span>
+                                    <span>Lesson Price (USD)</span>
                                     <input id="courseAccessPrice" type="number" min="0" step="0.01" placeholder="15" />
                                 </label>
                                 <label class="field">
@@ -1671,7 +1677,7 @@
 
     <script src="./js/firebase-bootstrap.js"></script>
 
-    <script type="module" src="./js/app.js?v=20260727-instant-slot-refresh-v22"></script>
+    <script type="module" src="./js/app.js?v=20260728-teacher-payments-v23"></script>
 </body>
 
 </html>

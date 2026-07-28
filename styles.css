@@ -4462,6 +4462,18 @@ main.site-shell {
     color: var(--muted);
 }
 
+.student-payment-packages {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
+    gap: 10px;
+    margin: 12px 0 8px;
+}
+
+.student-payment-card__button:disabled {
+    cursor: not-allowed;
+    opacity: 0.48;
+}
+
 .student-payment-reminder {
     display: flex;
     gap: 11px;
