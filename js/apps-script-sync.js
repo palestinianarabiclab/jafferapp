@@ -163,10 +163,10 @@ async function testAppsScriptConnection() {
     return callAppsScript("test", {}, { allowGet: true });
 }
 
-async function fetchBusyBlocksFromAppsScript({ days = 30, timeZone = "Africa/Cairo", includeTeacherDetails = false } = {}) {
+async function fetchBusyBlocksFromAppsScript({ days = 30, timeZone = "Africa/Cairo", includeTeacherDetails = false, force = false } = {}) {
     return callAppsScript(
         includeTeacherDetails ? "getTeacherBusy" : "getBusy",
-        { days, timeZone },
+        { days, timeZone, fresh: force === true },
         { allowGet: !includeTeacherDetails }
     );
 }

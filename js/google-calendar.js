@@ -573,7 +573,7 @@ window.importGoogleCalendarEventsToBusyBlocks = async function importGoogleCalen
         const existingExceptions = Array.isArray(teacherBookingSettings.exceptions) ? teacherBookingSettings.exceptions : [];
         // Imported calendar blocks are a mirror, not permanent manual exceptions.
         // Rebuild that part of the list so deleted/cancelled Google events become available again.
-        const exceptions = existingExceptions.filter((block) => block?.source !== "googleCalendar" && !block?.sourceEventId);
+        const exceptions = existingExceptions.filter((block) => String(block?.source || "").toLowerCase() !== "googlecalendar" && !block?.sourceEventId);
         
         let addedCount = 0;
         let skippedCount = 0;

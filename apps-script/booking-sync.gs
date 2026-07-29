@@ -780,7 +780,7 @@ function handleRequest_(e) {
       const calendarIds = getBusyCalendarIds_(config);
       const cache = CacheService.getScriptCache();
       const cacheKey = getBusyCacheKey_(calendarIds, days, timeZone);
-      const cached = cache.get(cacheKey);
+      const cached = String(req.fresh || '').toLowerCase() === 'true' ? null : cache.get(cacheKey);
       if (cached) {
         return ContentService
           .createTextOutput(cached)

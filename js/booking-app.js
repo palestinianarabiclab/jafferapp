@@ -1175,11 +1175,20 @@ async function refreshRuntimeBusyBlocksNow({ force = false, minDays = 0 } = {}) 
             days: requestedDays,
             timeZone: getTeacherTimezone(),
             includeTeacherDetails: state.teacherRole === "teacher",
+            force,
         });
         state.busySyncReady = !!(result?.success && Array.isArray(result.busyBlocks));
         state.busySyncMessage = state.busySyncReady ? "" : (result?.message || "Could not reach Google Calendar sync.");
+        const seenBusyIntervals = new Set();
         state.runtimeBusyBlocks = state.busySyncReady
-            ? [...result.busyBlocks].sort((a, b) => Number(a.startMs || 0) - Number(b.startMs || 0))
+            ? [...result.busyBlocks]
+                .filter((block) => {
+                    const key = `${Number(block?.startMs || 0)}:${Number(block?.endMs || 0)}`;
+                    if (seenBusyIntervals.has(key)) return false;
+                    seenBusyIntervals.add(key);
+                    return true;
+                })
+                .sort((a, b) => Number(a.startMs || 0) - Number(b.startMs || 0))
             : [];
         state.busyBlocksRangeDays = state.busySyncReady ? requestedDays : 0;
         state.busyBlocksFetchedAt = Date.now();
