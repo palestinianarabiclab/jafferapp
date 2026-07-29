@@ -74,6 +74,7 @@ const state = {
     reviewsSortMode: "newest",
     reviewsExpanded: false,
     selectedPackage: null,
+    reservedPaidLessons: 0,
     runtimeBusyBlocks: [],
     selectedSlotMs: null,
     selectedDateKey: "",
@@ -406,7 +407,7 @@ function loadScriptOnce(src) {
 async function ensureGoogleCalendarModuleLoaded() {
     if (window.connectToGoogleCalendar && window.importGoogleCalendarEventsToBusyBlocks) return;
     if (!state.googleCalendarModuleLoading) {
-        state.googleCalendarModuleLoading = loadScriptOnce("./js/google-calendar.js?v=20260727-calendar-parity-v4").finally(() => {
+        state.googleCalendarModuleLoading = loadScriptOnce("./js/google-calendar.js?v=20260729-busy-reconcile-v5").finally(() => {
             state.googleCalendarModuleLoading = null;
         });
     }
@@ -734,6 +735,34 @@ function getConfiguredLessonPrice() {
     return match ? toMoneyValue(match[0]) : 0;
 }
 
+function getStudentTotalLessonCredits(profile = state.studentProfile || {}, balance = Number(profile.balance || 0), lessonPrice = getConfiguredLessonPrice()) {
+    if (Number.isFinite(Number(profile.lessonCredits))) {
+        const packageCredits = Math.max(0, Math.floor(Number(profile.lessonCredits || 0)));
+        const legacyCredits = lessonPrice > 0
+            ? Math.max(0, Math.floor((balance - Number(profile.totalPaid || 0)) / lessonPrice))
+            : 0;
+        return packageCredits + legacyCredits;
+    }
+    return lessonPrice > 0 ? Math.max(0, Math.floor(balance / lessonPrice)) : 0;
+}
+
+function isUnchargedPaidBooking(booking) {
+    const status = String(booking?.status || "booked").toLowerCase();
+    return booking?.isFreeTrial !== true
+        && !booking?.balanceChargedAt
+        && booking?.balanceCharged !== true
+        && status !== "canceled"
+        && status !== "completed";
+}
+
+async function countReservedPaidLessons(studentUid) {
+    if (!window.db || !studentUid) return 0;
+    const snap = await window.db.collection("bookings").where("studentUid", "==", studentUid).limit(200).get();
+    let count = 0;
+    snap.forEach((doc) => { if (isUnchargedPaidBooking(doc.data() || {})) count += 1; });
+    return count;
+}
+
 function updateStudentBalanceUi() {
     const signedIn = isStudentSignedIn();
     if (els.studentBalanceCard) {
@@ -757,15 +786,7 @@ function updateStudentBalanceUi() {
 
     const remainingBadge = document.getElementById("studentRemainingLessonsBadge");
     if (remainingBadge) {
-        const hasPackageCredits = Number.isFinite(Number(state.studentProfile?.lessonCredits));
-        const legacyCredits = hasPackageCredits && lessonPrice > 0
-            ? Math.max(0, Math.floor((balance - Number(state.studentProfile?.totalPaid || 0)) / lessonPrice))
-            : 0;
-        const remainingLessons = hasPackageCredits
-            ? Math.max(0, Math.floor(Number(state.studentProfile.lessonCredits))) + legacyCredits
-            : lessonPrice > 0
-                ? (balance >= 0 ? Math.floor(balance / lessonPrice) : Math.ceil(balance / lessonPrice))
-                : 0;
+        const remainingLessons = Math.max(0, getStudentTotalLessonCredits() - Number(state.reservedPaidLessons || 0));
         if (remainingLessons > 0) {
             remainingBadge.textContent = `(${remainingLessons} lesson${remainingLessons === 1 ? "" : "s"} remaining)`;
             remainingBadge.style.background = "var(--primary)";
@@ -1780,6 +1801,7 @@ async function loadStudentBookings() {
     if (!els.bookingStatusList) return;
     els.bookingStatusList.innerHTML = "";
     if (!state.currentUser || state.currentRole !== "student") {
+        state.reservedPaidLessons = 0;
         els.bookingStatusList.innerHTML = "<div class=\"small-note\">Sign in to see your bookings.</div>";
         return;
     }
@@ -1831,6 +1853,8 @@ async function loadStudentBookings() {
 
         const rows = Array.from(rowsMap.values());
         rows.sort((a, b) => (b.slot || 0) - (a.slot || 0));
+        state.reservedPaidLessons = rows.filter(isUnchargedPaidBooking).length;
+        updateStudentBalanceUi();
         await syncLessonFeedbackPrompt(rows);
 
         const now = Date.now();
@@ -4181,9 +4205,11 @@ function wireStudentActions() {
             return;
         }
         const allowOverdraft = profile.allowOverdraft === true;
+        const reservedLessons = isTrial ? 0 : await countReservedPaidLessons(state.currentUser.uid);
+        const availableLessons = Math.max(0, getStudentTotalLessonCredits(profile, balance, lessonPrice) - reservedLessons);
 
-        if (!isTrial && !allowOverdraft && balance < lessonPrice) {
-            setStatus(els.bookingMsg, `Sorry, your balance is insufficient to book this lesson. (Required: $${lessonPrice}, Current: $${balance}). Please top up your account or contact the teacher.`, "error");
+        if (!isTrial && !allowOverdraft && availableLessons < 1) {
+            setStatus(els.bookingMsg, `You have no unreserved lesson credit left. ${reservedLessons} paid lesson${reservedLessons === 1 ? " is" : "s are"} already booked. Complete, cancel, or add credit before booking another lesson.`, "error");
             return;
         }
 
@@ -4238,6 +4264,7 @@ function wireStudentActions() {
             loadBookingStatus,
             isLocalDevHost,
         }));
+        await loadStudentBookings();
     });
 
     if (els.studentRatingSelect && !els.studentRatingSelect.querySelector("option[value='1']")) {
@@ -4597,6 +4624,19 @@ function removeExpiredExceptions() {
     const removedCount = exceptions.length - active.length;
     if (removedCount) state.bookingSettings.exceptions = active;
     return removedCount;
+}
+
+async function removeImportedCalendarExceptions() {
+    const exceptions = Array.isArray(state.bookingSettings.exceptions) ? state.bookingSettings.exceptions : [];
+    const manualOnly = exceptions.filter((item) => {
+        const source = String(item?.source || "").toLowerCase();
+        return source !== "googlecalendar" && !String(item?.sourceEventId || "").trim();
+    });
+    if (manualOnly.length === exceptions.length) return 0;
+    state.bookingSettings.exceptions = manualOnly;
+    await saveTeacherSettings();
+    renderExceptions();
+    return exceptions.length - manualOnly.length;
 }
 
 async function saveBookingSettingsPublicMirror() {
@@ -6729,12 +6769,14 @@ function wireTeacherActions() {
     });
 
     els.appsScriptRefreshBusyBtn?.addEventListener("click", async (event) => {
+        let removedCount = 0;
         await withButtonLoading(event.currentTarget, "Importing...", async () => {
-            await refreshRuntimeBusyBlocks();
+            await refreshRuntimeBusyBlocks({ force: true, minDays: 31 });
+            removedCount = await removeImportedCalendarExceptions();
             await renderBookingCalendar();
         });
         setStatus(els.appsScriptMsg, state.runtimeBusyBlocks.length
-            ? `Loaded ${state.runtimeBusyBlocks.length} busy blocks from Apps Script.`
+            ? `Loaded ${state.runtimeBusyBlocks.length} current busy blocks${removedCount ? ` and removed ${removedCount} stale imported block${removedCount === 1 ? "" : "s"}` : ""}.`
             : "Apps Script busy blocks refreshed.", "success");
     });
 
@@ -7436,15 +7478,17 @@ function wireTeacherActions() {
     });
 
     els.googleImportBtn?.addEventListener("click", async (event) => {
+        let removedCount = 0;
         await withButtonLoading(event.currentTarget, "Importing...", async () => {
             await refreshRuntimeBusyBlocks({ force: true, minDays: 31 });
             if (!state.busySyncReady) {
                 throw new Error(state.busySyncMessage || "Could not load Google Calendar busy times.");
             }
+            removedCount = await removeImportedCalendarExceptions();
             await renderBookingCalendar();
         }).then(async () => {
             const count = state.runtimeBusyBlocks.length;
-            state.googleCalendarMessage = `Busy times refreshed through Apps Script (${count} event${count === 1 ? "" : "s"}).`;
+            state.googleCalendarMessage = `Busy times refreshed through Apps Script (${count} event${count === 1 ? "" : "s"})${removedCount ? `; removed ${removedCount} stale imported block${removedCount === 1 ? "" : "s"}` : ""}.`;
             await refreshGoogleCalendarStatus();
         }).catch((error) => {
             setStatus(els.googleCalendarStatus, error?.message || "Import failed.", "error");
