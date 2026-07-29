@@ -196,10 +196,7 @@ async function sendLessonReminderCheck() {
 }
 
 async function createBookingViaAppsScript(payload) {
-    return callAppsScript("createBooking", {
-        ...payload,
-        siteUrl: `${window.location.origin}${window.location.pathname}`,
-    });
+    return callAppsScript("createBooking", payload);
 }
 
 async function deleteBookingViaAppsScript(payload) {
@@ -207,10 +204,7 @@ async function deleteBookingViaAppsScript(payload) {
 }
 
 async function rescheduleBookingViaAppsScript(payload) {
-    return callAppsScript("rescheduleBooking", {
-        ...payload,
-        siteUrl: `${window.location.origin}${window.location.pathname}`,
-    });
+    return callAppsScript("rescheduleBooking", payload);
 }
 
 async function syncPendingBookingsViaAppsScript({ limit = 10 } = {}) {
