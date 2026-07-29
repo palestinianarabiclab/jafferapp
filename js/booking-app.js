@@ -283,6 +283,11 @@ function cacheDom() {
         "studentReviewSubmit",
         "studentReviewMsg",
         "studentReviewSuccessBox",
+        "studentReviewPrompt",
+        "studentReviewPromptWrite",
+        "studentReviewPromptLater",
+        "studentReviewPromptDismiss",
+        "studentReviewPromptMsg",
         "lessonFeedbackCard",
         "lessonFeedbackForm",
         "lessonFeedbackBookingId",
@@ -4388,6 +4393,37 @@ function wireStudentActions() {
         }
     });
 
+    els.studentReviewPromptWrite?.addEventListener("click", () => {
+        if (els.studentReviewPrompt) els.studentReviewPrompt.hidden = true;
+        els.studentReviewCard?.scrollIntoView({ behavior: "smooth", block: "start" });
+        window.setTimeout(() => els.studentReviewText?.focus(), 450);
+    });
+
+    els.studentReviewPromptLater?.addEventListener("click", () => {
+        const key = els.studentReviewPrompt?.dataset.sessionKey;
+        if (key) sessionStorage.setItem(key, "true");
+        if (els.studentReviewPrompt) els.studentReviewPrompt.hidden = true;
+    });
+
+    els.studentReviewPromptDismiss?.addEventListener("click", async () => {
+        const user = state.currentUser;
+        if (!user?.uid || !window.db) return;
+        try {
+            await withButtonLoading(els.studentReviewPromptDismiss, "Saving...", async () => {
+                await window.db.collection("users").doc(user.uid).set({
+                    reviewRequested: false,
+                }, { merge: true });
+                state.studentProfile = {
+                    ...(state.studentProfile || {}),
+                    reviewRequested: false,
+                };
+                syncStudentReviewUi();
+            });
+        } catch (error) {
+            setStatus(els.studentReviewPromptMsg, error.message || "Could not close the review request.", "error");
+        }
+    });
+
     const selectPaymentPackage = (event) => {
         const card = event.target.closest("[data-package-lessons]");
         if (!card) return;
@@ -6052,6 +6088,15 @@ function syncStudentReviewUi() {
     const studentProfile = state.studentProfile || {};
     const hasReviewed = localStorage.getItem(`review_submitted_${user?.uid || user?.email || "guest"}`) === "true" || studentProfile.hasSubmittedReview === true;
     const reviewRequested = studentProfile.reviewRequested === true && !hasReviewed;
+    const requestStamp = studentProfile.reviewRequestedAt?.toMillis?.()
+        || studentProfile.reviewRequestedAt?.seconds
+        || studentProfile.reviewRequestedAt
+        || "active";
+    const promptSessionKey = `review_prompt_later_${user?.uid || user?.email || "guest"}_${requestStamp}`;
+    if (els.studentReviewPrompt) {
+        els.studentReviewPrompt.hidden = !reviewRequested || sessionStorage.getItem(promptSessionKey) === "true";
+        els.studentReviewPrompt.dataset.sessionKey = promptSessionKey;
+    }
 
     const shouldShowReviewCard = reviewRequested && !hasReviewed;
     els.studentReviewCard.hidden = !shouldShowReviewCard;

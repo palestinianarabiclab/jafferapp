@@ -3979,6 +3979,19 @@ main.site-shell {
     gap: 20px;
 }
 
+.student-review-prompt-dialog {
+    max-width: 560px;
+    text-align: center;
+}
+
+.student-review-prompt-dialog .lesson-feedback-dialog__head {
+    justify-content: center;
+}
+
+.student-review-prompt-actions {
+    justify-content: center;
+}
+
 .lesson-feedback-dialog__head {
     display: flex;
     align-items: flex-start;

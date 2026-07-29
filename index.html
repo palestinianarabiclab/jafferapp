@@ -568,6 +568,25 @@
                     </div>
                 </article>
 
+                <article class="lesson-feedback-card" id="studentReviewPrompt" role="dialog" aria-modal="true" aria-labelledby="studentReviewPromptTitle" hidden>
+                    <div class="lesson-feedback-dialog student-review-prompt-dialog">
+                        <div class="lesson-feedback-dialog__head">
+                            <div>
+                                <span class="lesson-feedback-dialog__icon" aria-hidden="true">&#11088;</span>
+                                <p class="eyebrow">Your feedback matters</p>
+                                <h3 id="studentReviewPromptTitle">How was your learning experience?</h3>
+                                <p class="small-note">Your honest review helps improve the lessons and helps other students choose with confidence. It only takes a minute.</p>
+                            </div>
+                        </div>
+                        <div class="lesson-feedback-actions student-review-prompt-actions">
+                            <button id="studentReviewPromptWrite" type="button" class="btn btn--primary">Write a Review</button>
+                            <button id="studentReviewPromptLater" type="button" class="btn btn--ghost">Maybe Later</button>
+                            <button id="studentReviewPromptDismiss" type="button" class="btn btn--ghost">Don't ask again</button>
+                        </div>
+                        <p id="studentReviewPromptMsg" class="status-line"></p>
+                    </div>
+                </article>
+
                 <!-- 5. Leave a Teacher Review -->
                 <article class="panel panel--form" id="studentReviewCard" hidden style="display: none;">
                         <div class="panel__head">
@@ -1673,7 +1692,7 @@
 
     <script src="./js/firebase-bootstrap.js"></script>
 
-    <script type="module" src="./js/app.js?v=20260729-credit-reservations-v28"></script>
+    <script type="module" src="./js/app.js?v=20260729-review-prompt-v29"></script>
 </body>
 
 </html>
