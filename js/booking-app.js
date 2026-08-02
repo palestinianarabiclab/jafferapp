@@ -3871,7 +3871,7 @@ function wireStudentActions() {
             reschedule: "Loading times...",
             "confirm-reschedule": "Rescheduling...",
         };
-        const shouldShowLoading = Boolean(loadingTextByAction[action]);
+        const shouldShowLoading = Boolean(loadingTextByAction[action]) && action !== "cancel";
         try {
             if (shouldShowLoading) {
                 setAppLoading(true, loadingTextByAction[action]);
@@ -3912,6 +3912,9 @@ function wireStudentActions() {
                 return;
             }
             if (action === "cancel") {
+                const bookingSnap = await window.db.collection("bookings").doc(bookingId).get();
+                const booking = { id: bookingSnap.id, ...(bookingSnap.data() || {}) };
+                if (!await confirmStudentCancellation(booking)) return;
                 const result = await cancelStudentBooking(bookingId);
                 setStatus(
                     els.bookingStatusMsg,
@@ -6133,6 +6136,105 @@ function syncStudentReviewUi() {
     }
 }
 
+function closeStudentLessonsModal() {
+    const modal = document.getElementById("studentLessonsModal");
+    modal?.classList.remove("modal--open");
+    modal?.setAttribute("aria-hidden", "true");
+}
+
+function renderStudentLessonRecords(rows, className) {
+    if (!rows.length) return '<div class="small-note">No lessons in this section.</div>';
+    return rows.map((booking) => {
+        const slot = getBookingSlotMs(booking.slot);
+        const duration = Number(booking.durationMinutes || booking.slotMinutes || state.bookingSettings?.slotMinutes || 50);
+        const dateLabel = slot ? new Date(slot).toLocaleString([], { dateStyle: "medium", timeStyle: "short", timeZone: getTeacherTimezone() }) : "Date unavailable";
+        const status = String(booking.status || "booked").toLowerCase();
+        const detail = booking.isFreeTrial ? "Free trial" : `${duration} minutes · ${status}`;
+        return `<div class="student-lesson-record ${className}"><strong>${escapeHtml(dateLabel)}</strong><span>${escapeHtml(detail)}</span></div>`;
+    }).join("");
+}
+
+function getBookingSlotMs(value) {
+    if (typeof value === "number") return value;
+    if (value instanceof Date) return value.getTime();
+    if (typeof value?.toMillis === "function") return value.toMillis();
+    if (Number.isFinite(Number(value?.seconds))) return Number(value.seconds) * 1000;
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return numeric;
+    const parsed = Date.parse(String(value || ""));
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+async function openStudentLessonsModal(student) {
+    const modal = document.getElementById("studentLessonsModal");
+    const content = document.getElementById("studentLessonsModalContent");
+    const title = document.getElementById("studentLessonsModalTitle");
+    const subtitle = document.getElementById("studentLessonsModalSubtitle");
+    if (!modal || !content || !student?.id) return;
+    title.textContent = `${student.name || "Student"}'s Lessons`;
+    subtitle.textContent = student.email || "";
+    content.innerHTML = '<div class="small-note">Loading lesson history...</div>';
+    modal.classList.add("modal--open");
+    modal.setAttribute("aria-hidden", "false");
+    try {
+        const queries = [window.db.collection("bookings").where("studentUid", "==", student.id).limit(200).get()];
+        if (student.email) queries.push(window.db.collection("bookings").where("email", "==", student.email).limit(200).get());
+        if (student.name) queries.push(window.db.collection("bookings").where("name", "==", student.name).limit(200).get());
+        const snapshots = await Promise.all(queries);
+        const rowMap = new Map();
+        const normalizedEmail = String(student.email || "").trim().toLowerCase();
+        const normalizedName = String(student.name || "").trim().toLowerCase();
+        snapshots.forEach((snapshot) => snapshot.forEach((doc) => {
+            const row = doc.data() || {};
+            const matchesUid = String(row.studentUid || "") === String(student.id);
+            const matchesEmail = normalizedEmail && String(row.email || row.studentEmail || "").trim().toLowerCase() === normalizedEmail;
+            const matchesLegacyName = !row.studentUid && normalizedName && String(row.name || row.studentName || "").trim().toLowerCase() === normalizedName;
+            if (matchesUid || matchesEmail || matchesLegacyName) rowMap.set(doc.id, { id: doc.id, ...row });
+        }));
+        const now = Date.now();
+        const rows = Array.from(rowMap.values()).sort((a, b) => getBookingSlotMs(a.slot) - getBookingSlotMs(b.slot));
+        const canceled = rows.filter((row) => String(row.status || "").toLowerCase() === "canceled").reverse();
+        const upcoming = rows.filter((row) => {
+            const status = String(row.status || "booked").toLowerCase();
+            return status !== "canceled" && status !== "completed" && getBookingSlotMs(row.slot) >= now;
+        });
+        const taken = rows.filter((row) => {
+            const status = String(row.status || "booked").toLowerCase();
+            return status !== "canceled" && (status === "completed" || (getBookingSlotMs(row.slot) > 0 && getBookingSlotMs(row.slot) < now));
+        }).reverse();
+        content.innerHTML = `
+            <div class="student-lessons-summary"><div><strong>${upcoming.length}</strong><span>Upcoming</span></div><div><strong>${taken.length}</strong><span>Taken</span></div><div><strong>${canceled.length}</strong><span>Canceled</span></div></div>
+            <div class="student-lessons-groups">
+                <section class="student-lessons-group"><h4>Upcoming Lessons</h4>${renderStudentLessonRecords(upcoming, "")}</section>
+                <section class="student-lessons-group"><h4>Taken Lessons</h4>${renderStudentLessonRecords(taken, "student-lesson-record--taken")}</section>
+                <section class="student-lessons-group"><h4>Canceled Lessons</h4>${renderStudentLessonRecords(canceled, "student-lesson-record--canceled")}</section>
+            </div>`;
+    } catch (error) {
+        content.innerHTML = `<div class="status-line is-error">${escapeHtml(error.message || "Could not load lesson history.")}</div>`;
+    }
+}
+
+function confirmStudentCancellation(booking) {
+    const modal = document.getElementById("studentCancelConfirmModal");
+    const message = document.getElementById("studentCancelConfirmMessage");
+    const charge = document.getElementById("studentCancelConfirmCharge");
+    if (!modal || !message || !charge) return Promise.resolve(window.confirm("Cancel this lesson?"));
+    const hoursRemaining = (Number(booking?.slot || 0) - Date.now()) / 3600000;
+    const lateCharge = booking?.isFreeTrial !== true && hoursRemaining < 12;
+    const price = toMoneyValue(booking?.lessonPrice || getStudentLessonPrice());
+    message.textContent = `Lesson scheduled for ${new Date(Number(booking?.slot || 0)).toLocaleString()}.`;
+    charge.classList.toggle("is-free", !lateCharge);
+    charge.textContent = lateCharge
+        ? `Late cancellation: one lesson${price > 0 ? ` (${formatMoney(price)})` : ""} will be deducted. Do you want to continue?`
+        : "This cancellation is outside the 12-hour charge window. No lesson credit will be deducted.";
+    modal.classList.add("modal--open");
+    modal.setAttribute("aria-hidden", "false");
+    return new Promise((resolve) => {
+        const finish = (answer) => { modal.classList.remove("modal--open"); modal.setAttribute("aria-hidden", "true"); resolve(answer); };
+        modal.querySelectorAll("[data-cancel-confirm]").forEach((button) => { button.onclick = () => finish(button.dataset.cancelConfirm === "yes"); });
+    });
+}
+
 async function refreshTeacherStudents() {
     if (!els.teacherStudentsList) return;
     els.teacherStudentsList.innerHTML = "<div class=\"small-note\">Loading students...</div>";
@@ -6258,6 +6360,7 @@ async function refreshTeacherStudents() {
                             </label>
                         </div>
                         <div class="action-row">
+                            <button class="btn btn--outline btn--small" type="button" data-student-action="view-lessons" data-student-id="${escapeHtml(student.id)}">View Lessons</button>
                             <button class="btn btn--primary btn--small" type="submit" data-student-action="save">Save Student</button>
                             <button class="btn btn--ghost btn--small" type="button" data-student-action="delete">Delete Student</button>
                         </div>
@@ -7200,7 +7303,17 @@ function wireTeacherActions() {
         });
     });
 
+    document.querySelectorAll("[data-close-student-lessons]").forEach((button) => {
+        button.addEventListener("click", closeStudentLessonsModal);
+    });
+
     els.teacherStudentsList?.addEventListener("click", (event) => {
+        const viewLessonsBtn = event.target.closest("[data-student-action='view-lessons']");
+        if (viewLessonsBtn) {
+            const studentId = viewLessonsBtn.dataset.studentId;
+            openStudentLessonsModal(state.studentCache.get(studentId) || { id: studentId }).catch(console.error);
+            return;
+        }
         const toggle = event.target.closest("[data-student-action='toggle']");
         if (toggle) {
             const item = toggle.closest("[data-student-id]");

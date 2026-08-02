@@ -1686,13 +1686,39 @@
         </div>
     </div>
 
+    <div class="modal" id="studentLessonsModal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="studentLessonsModalTitle">
+        <div class="modal__backdrop" data-close-student-lessons></div>
+        <div class="modal__body modal__body--wide student-lessons-modal__body">
+            <button class="modal__close" type="button" data-close-student-lessons aria-label="Close">&times;</button>
+            <div class="student-lessons-modal__head">
+                <span class="student-lessons-modal__icon" aria-hidden="true">&#128197;</span>
+                <div><p class="eyebrow">Student lesson record</p><h3 id="studentLessonsModalTitle">Student Lessons</h3><p id="studentLessonsModalSubtitle" class="small-note"></p></div>
+            </div>
+            <div id="studentLessonsModalContent" class="student-lessons-modal__content"></div>
+        </div>
+    </div>
+
+    <div class="modal" id="studentCancelConfirmModal" aria-hidden="true" role="alertdialog" aria-modal="true" aria-labelledby="studentCancelConfirmTitle">
+        <div class="modal__backdrop" data-cancel-confirm="no"></div>
+        <div class="modal__body cancellation-confirm__body">
+            <span class="cancellation-confirm__icon" aria-hidden="true">!</span>
+            <h3 id="studentCancelConfirmTitle">Cancel this lesson?</h3>
+            <p id="studentCancelConfirmMessage"></p>
+            <div id="studentCancelConfirmCharge" class="cancellation-confirm__charge"></div>
+            <div class="action-row action-row--end">
+                <button id="studentCancelKeepBtn" class="btn btn--ghost" type="button" data-cancel-confirm="no">Keep Lesson</button>
+                <button id="studentCancelProceedBtn" class="btn btn--primary" type="button" data-cancel-confirm="yes">Yes, Cancel Lesson</button>
+            </div>
+        </div>
+    </div>
+
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
 
     <script src="./js/firebase-bootstrap.js"></script>
 
-    <script type="module" src="./js/app.js?v=20260729-site-lesson-access-v31"></script>
+    <script type="module" src="./js/app.js?v=20260802-legacy-lessons-v33"></script>
 </body>
 
 </html>
