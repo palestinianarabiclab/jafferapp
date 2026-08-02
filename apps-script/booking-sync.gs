@@ -930,8 +930,11 @@ function handleRequest_(e) {
         'Notes: ' + notes,
         'Timezone: ' + timeZone
       ].join('\n');
-      var calendarInviteSent = isValidEmail_(email);
-      var calendarInviteError = calendarInviteSent ? '' : 'Student email is invalid for calendar invite.';
+      // Send the Meet URL in our own confirmation email, but do not add the
+      // student as a Calendar attendee. Calendar guests may be treated as
+      // trusted invitees and bypass the teacher's "Ask to join" approval.
+      var calendarInviteSent = false;
+      var calendarInviteError = '';
       const eventResource = {
         summary: 'Lesson with ' + name,
         description: description,
@@ -957,9 +960,6 @@ function handleRequest_(e) {
           }
         }
       };
-      if (calendarInviteSent) {
-        eventResource.attendees = [{ email: normalizeEmail_(email) }];
-      }
       const bookingLock = LockService.getScriptLock();
       bookingLock.waitLock(20000);
       let event;
@@ -1000,7 +1000,7 @@ function handleRequest_(e) {
           config.primaryCalendarId,
           {
             conferenceDataVersion: 1,
-            sendUpdates: calendarInviteSent ? 'all' : 'none'
+            sendUpdates: 'none'
           }
         );
       } finally {
@@ -1032,7 +1032,7 @@ function handleRequest_(e) {
       } catch (mailErr) {
         notificationError = mailErr && mailErr.message ? mailErr.message : String(mailErr);
       }
-      if (!calendarInviteSent) {
+      if (isValidEmail_(email)) {
         try {
           studentConfirmationSent = sendStudentConfirmationEmail_(email, {
             name: name,

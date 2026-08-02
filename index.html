@@ -1106,6 +1106,21 @@
                     </section>
 
                     <section class="teacher-editor__section">
+                        <h4>Payments Total</h4>
+                        <p class="teacher-edit-note">
+                            Manually correct the cumulative amount displayed as Total Payments Received. This does not change any student's balance.
+                        </p>
+                        <form id="revenueSettingsForm" class="form-stack">
+                            <label class="field">
+                                <span>Total Payments Received (USD)</span>
+                                <input id="teacherRevenueTotalInput" type="number" min="0" step="0.01" placeholder="0.00" required />
+                            </label>
+                            <button type="submit" class="btn btn--primary">Save Payments Total</button>
+                            <p id="revenueSettingsMsg" class="status-line"></p>
+                        </form>
+                    </section>
+
+                    <section class="teacher-editor__section">
                         <h4>Course Offers & PayPal</h4>
                         <p class="teacher-edit-note">
                             Set the public course offer, lesson package defaults, and the PayPal reminder shown to students.
@@ -1718,7 +1733,7 @@
 
     <script src="./js/firebase-bootstrap.js"></script>
 
-    <script type="module" src="./js/app.js?v=20260802-legacy-lessons-v33"></script>
+    <script type="module" src="./js/app.js?v=20260802-revenue-setting-v36"></script>
 </body>
 
 </html>
