@@ -782,12 +782,9 @@ export function saveLocalReviews(storageKey, reviews) {
 
 export async function loadCloudReviews(db, defaultReviews) {
     try {
-        // Imported profile reviews are bundled locally. Fetch only reviews
-        // submitted by actual student accounts from Firestore.
         const snap = await db
             .collection("reviews")
-            .where("source", "==", "Student Review")
-            .limit(50)
+            .limit(100)
             .get();
         if (!snap.empty) {
             const items = [];

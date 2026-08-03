@@ -576,6 +576,57 @@ function getPreplyStatistics_(config, days) {
   };
 }
 
+function extractJsonArrayAfterMarker_(text, marker) {
+  const start = text.indexOf(marker);
+  if (start < 0) throw new Error('Preply reviews data was not found.');
+  const arrayStart = start + marker.length - 1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = arrayStart; i < text.length; i += 1) {
+    const ch = text.charAt(i);
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === '[') depth += 1;
+    else if (ch === ']') {
+      depth -= 1;
+      if (depth === 0) return text.substring(arrayStart, i + 1);
+    }
+  }
+  throw new Error('Preply reviews data was incomplete.');
+}
+
+function getPreplyReviews_() {
+  const profileUrl = 'https://preply.com/en/tutor/6641663';
+  const response = UrlFetchApp.fetch(profileUrl, { muteHttpExceptions: true, followRedirects: true });
+  if (response.getResponseCode() !== 200) throw new Error('Preply returned HTTP ' + response.getResponseCode() + '.');
+  const raw = JSON.parse(extractJsonArrayAfterMarker_(response.getContentText(), '"reviews":['));
+  const reviews = raw.map(function (review, index) {
+    const createdAt = new Date(review.created || 0).getTime() || 0;
+    const name = String((review.user || {}).firstName || 'Preply student').trim();
+    return {
+      id: 'preply-' + String(review.id),
+      preplyReviewId: String(review.id),
+      name: name,
+      country: 'Verified student',
+      rating: Math.max(1, Math.min(5, Number(review.score || 5))),
+      tag: 'Preply student',
+      date: Utilities.formatDate(new Date(createdAt), 'UTC', 'MMMM d, yyyy') + (review.isEdited ? ' (edited)' : ''),
+      text: String(review.content || '').trim(),
+      avatar: name.substring(0, 2).toUpperCase(),
+      source: 'Preply',
+      createdAt: createdAt,
+      preplyOrder: index
+    };
+  }).filter(function (review) { return review.text; });
+  return { success: true, message: 'Preply reviews loaded.', reviews: reviews, count: reviews.length };
+}
+
 function parseRequest_(e) {
   let body = {};
   try {
@@ -830,6 +881,12 @@ function handleRequest_(e) {
       const caller = requireTeacherCaller_(config, req.authToken);
       enforceCallerRateLimit_(caller, 'getPreplyStatistics', 30, 3600);
       return jsonOut(getPreplyStatistics_(config, req.days));
+    }
+
+    if (action === 'getPreplyReviews') {
+      const caller = requireTeacherCaller_(config, req.authToken);
+      enforceCallerRateLimit_(caller, 'getPreplyReviews', 12, 3600);
+      return jsonOut(getPreplyReviews_());
     }
 
     if (action === 'createBusyBlock') {

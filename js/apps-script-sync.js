@@ -183,6 +183,10 @@ async function getPreplyStatisticsViaAppsScript({ days = 730 } = {}) {
     return callAppsScript("getPreplyStatistics", { days });
 }
 
+async function getPreplyReviewsViaAppsScript() {
+    return callAppsScript("getPreplyReviews");
+}
+
 async function getAppsScriptEmailQuota() {
     return callAppsScript("getEmailQuota");
 }
@@ -305,6 +309,7 @@ window.fetchBusyBlocksFromAppsScript = fetchBusyBlocksFromAppsScript;
 window.createBusyBlockViaAppsScript = createBusyBlockViaAppsScript;
 window.sendReviewRequestViaAppsScript = sendReviewRequestViaAppsScript;
 window.getPreplyStatisticsViaAppsScript = getPreplyStatisticsViaAppsScript;
+window.getPreplyReviewsViaAppsScript = getPreplyReviewsViaAppsScript;
 window.getAppsScriptEmailQuota = getAppsScriptEmailQuota;
 window.installLessonReminderTrigger = installLessonReminderTrigger;
 window.sendLessonReminderCheck = sendLessonReminderCheck;

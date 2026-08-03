@@ -979,6 +979,16 @@
                 <!-- TAB 4: REVIEWS -->
                 <div id="tab-reviews" class="teacher-tab-content" role="tabpanel" hidden>
                     <section class="teacher-editor__section">
+                        <h4>Preply Reviews Sync</h4>
+                        <p class="teacher-edit-note">Normal sync writes only new or changed reviews. Use rebuild only to repair the complete Preply list. Website reviews are always preserved.</p>
+                        <div class="action-row action-row--wrap">
+                            <button id="syncPreplyReviewsBtn" type="button" class="btn btn--primary">Sync New & Updated Reviews</button>
+                            <button id="rebuildPreplyReviewsBtn" type="button" class="btn btn--outline">Rebuild All Preply Reviews</button>
+                        </div>
+                        <p id="preplyReviewsSyncMsg" class="status-line"></p>
+                    </section>
+
+                    <section class="teacher-editor__section">
                         <div class="panel__head">
                             <div>
                                 <h4>Lesson Feedback Analytics</h4>
@@ -1733,7 +1743,7 @@
 
     <script src="./js/firebase-bootstrap.js"></script>
 
-    <script type="module" src="./js/app.js?v=20260802-revenue-setting-v36"></script>
+    <script type="module" src="./js/app.js?v=20260803-preply-incremental-v39"></script>
 </body>
 
 </html>

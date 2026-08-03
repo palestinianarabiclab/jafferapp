@@ -325,6 +325,9 @@ function cacheDom() {
         "studentReviewsSection",
         "teacherReviewsCountLabel",
         "teacherReviewsAdminList",
+        "syncPreplyReviewsBtn",
+        "rebuildPreplyReviewsBtn",
+        "preplyReviewsSyncMsg",
         "appsScriptForm",
         "teacherAppsScriptUrl",
         "appsScriptMsg",
@@ -6798,6 +6801,70 @@ function wireTeacherActions() {
         renderReviewsUi();
     });
 
+    const syncPreplyReviews = async (rebuild = false) => {
+        const result = await window.getPreplyReviewsViaAppsScript?.();
+        if (!result?.success || !Array.isArray(result.reviews)) throw new Error(result?.message || "Could not load Preply reviews.");
+        const snapshot = await window.db.collection("reviews").limit(200).get();
+        const existingById = new Map(snapshot.docs.map((doc) => [doc.id, doc.data() || {}]));
+        const incomingIds = new Set(result.reviews.map((review) => review.id));
+        const batch = window.db.batch();
+        let writeCount = 0;
+        let newCount = 0;
+        let updatedCount = 0;
+        if (rebuild) {
+            snapshot.docs.forEach((doc) => {
+                const source = String((doc.data() || {}).source || "");
+                const isManagedPreplyReview = source === "Preply" || /^(?:preply-|jaffer-preply-|rev-preply-)/i.test(doc.id);
+                if (isManagedPreplyReview && !incomingIds.has(doc.id)) {
+                    batch.delete(doc.ref);
+                    writeCount += 1;
+                }
+            });
+        }
+        result.reviews.forEach((review) => {
+            const existing = existingById.get(review.id);
+            const comparable = (value = {}) => JSON.stringify([value.name, value.rating, value.date, value.text, value.source, value.createdAt, value.preplyOrder]);
+            if (rebuild || !existing || comparable(existing) !== comparable(review)) {
+                batch.set(window.db.collection("reviews").doc(review.id), review);
+                writeCount += 1;
+                if (existing) updatedCount += 1;
+                else newCount += 1;
+            }
+        });
+        if (writeCount) await batch.commit();
+        const websiteReviews = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })).filter((review) => review.source === "Student Review");
+        state.reviews = [...result.reviews, ...websiteReviews];
+        saveLocalReviews("teacher_reviews_v1", state.reviews);
+        renderReviewsUi();
+        return { total: result.reviews.length, writes: writeCount, newCount, updatedCount };
+    };
+
+    els.syncPreplyReviewsBtn?.addEventListener("click", async (event) => {
+        try {
+            await withButtonLoading(event.currentTarget, "Syncing...", async () => {
+                const summary = await syncPreplyReviews(false);
+                const message = summary.writes
+                    ? `${summary.newCount} new and ${summary.updatedCount} updated reviews synced. ${summary.total} total on Preply.`
+                    : `Already up to date. ${summary.total} Preply reviews; no Firebase writes needed.`;
+                setStatus(els.preplyReviewsSyncMsg, message, "success");
+            });
+        } catch (error) {
+            setStatus(els.preplyReviewsSyncMsg, error.message || "Could not sync Preply reviews.", "error");
+        }
+    });
+
+    els.rebuildPreplyReviewsBtn?.addEventListener("click", async (event) => {
+        if (!window.confirm("Rebuild all Preply reviews from the source? Website-submitted reviews will be preserved.")) return;
+        try {
+            await withButtonLoading(event.currentTarget, "Rebuilding...", async () => {
+                const summary = await syncPreplyReviews(true);
+                setStatus(els.preplyReviewsSyncMsg, `${summary.total} Preply reviews rebuilt successfully.`, "success");
+            });
+        } catch (error) {
+            setStatus(els.preplyReviewsSyncMsg, error.message || "Could not rebuild Preply reviews.", "error");
+        }
+    });
+
     els.toggleAdminReviewsListBtn?.addEventListener("click", () => {
         const list = document.getElementById("teacherReviewsAdminList");
         if (!list) return;
@@ -8037,14 +8104,11 @@ async function init() {
         });
 
         // Filter out old Preply reviews
-        let filteredRevs = (cloudRevs || []).filter(r => !["rev-preply-1", "rev-preply-2", "rev-preply-3"].includes(r.id));
+        let filteredRevs = (cloudRevs && cloudRevs.length ? cloudRevs : cleanedInitialRevs)
+            .filter(r => !["rev-preply-1", "rev-preply-2", "rev-preply-3"].includes(r.id));
 
         const cloudIds = new Set(filteredRevs.map(r => r.id));
-        for (const r of cleanedInitialRevs) {
-            if (!cloudIds.has(r.id)) {
-                filteredRevs.push(r);
-            }
-        }
+        if (!cloudRevs || !cloudRevs.length) cleanedInitialRevs.forEach((r) => { if (!cloudIds.has(r.id)) filteredRevs.push(r); });
 
         filteredRevs.sort((a, b) => {
             const indexA = cleanedInitialRevs.findIndex(ir => ir.id === a.id);
