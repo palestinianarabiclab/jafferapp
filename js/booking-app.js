@@ -2231,8 +2231,13 @@ async function loadPublicLessonFeedbackSummary() {
         state.lessonFeedbackSummaryUnsubscribe = null;
     }
     const renderSummary = (rawSummary = {}) => {
-        const studentCount = LESSON_FEEDBACK_BASELINE.studentCount;
-        const averages = LESSON_FEEDBACK_BASELINE.averages;
+        const studentCount = Math.max(
+            LESSON_FEEDBACK_BASELINE.studentCount,
+            Number(rawSummary.studentCount || rawSummary.count || 0)
+        );
+        const averages = rawSummary.averages && studentCount > LESSON_FEEDBACK_BASELINE.studentCount
+            ? { ...LESSON_FEEDBACK_BASELINE.averages, ...rawSummary.averages }
+            : LESSON_FEEDBACK_BASELINE.averages;
         els.lessonRatingSummary.hidden = false;
         renderLessonFeedbackMetricCards(els.lessonRatingSummaryGrid, {
             count: studentCount,
@@ -2241,6 +2246,13 @@ async function loadPublicLessonFeedbackSummary() {
         els.lessonRatingSummaryCount.textContent = `Based on ${studentCount} anonymous student review${studentCount === 1 ? "" : "s"}`;
     };
     renderSummary();
+    state.lessonFeedbackSummaryUnsubscribe = window.db
+        .collection("lessonFeedbackSummary")
+        .doc("public")
+        .onSnapshot(
+            (doc) => renderSummary(doc.exists ? (doc.data() || {}) : {}),
+            (error) => console.warn("Could not load public lesson feedback summary.", error)
+        );
 }
 
 async function refreshTeacherLessonFeedback() {
@@ -2256,6 +2268,14 @@ async function refreshTeacherLessonFeedback() {
     const snap = await window.db.collection("lessonFeedback").orderBy("createdAt", "desc").limit(100).get();
     const rows = snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
     const summary = buildLessonFeedbackSummary(rows);
+    await window.db.collection("lessonFeedbackSummary").doc("public").set({
+        count: Math.round(summary.studentCount),
+        studentCount: Math.round(summary.studentCount),
+        lessonCount: Math.round(summary.lessonCount),
+        baselineStudentCount: LESSON_FEEDBACK_BASELINE.studentCount,
+        averages: summary.averages,
+        updatedAt: Date.now(),
+    }, { merge: true });
     if (els.teacherLessonFeedbackCount) {
         els.teacherLessonFeedbackCount.textContent = `${summary.studentCount} students · ${summary.lessonCount} new lesson rating${summary.lessonCount === 1 ? "" : "s"}`;
     }
@@ -2287,6 +2307,15 @@ function stopTeacherLessonFeedbackListener() {
 
 function startTeacherLessonFeedbackListener() {
     stopTeacherLessonFeedbackListener();
+    if (!window.db || !state.teacherUser || state.teacherRole !== "teacher") return;
+    state.teacherLessonFeedbackUnsubscribe = window.db
+        .collection("lessonFeedback")
+        .onSnapshot(() => {
+            if (state.teacherLessonFeedbackRefreshTimer) window.clearTimeout(state.teacherLessonFeedbackRefreshTimer);
+            state.teacherLessonFeedbackRefreshTimer = window.setTimeout(() => {
+                refreshTeacherLessonFeedback().catch((error) => console.warn("Could not refresh lesson feedback.", error));
+            }, 250);
+        }, (error) => console.warn("Lesson feedback listener failed.", error));
 }
 
 function stopStudentBookingsListener() {
