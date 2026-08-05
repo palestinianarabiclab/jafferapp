@@ -6811,16 +6811,17 @@ function wireTeacherActions() {
         let writeCount = 0;
         let newCount = 0;
         let updatedCount = 0;
-        if (rebuild) {
-            snapshot.docs.forEach((doc) => {
-                const source = String((doc.data() || {}).source || "");
-                const isManagedPreplyReview = source === "Preply" || /^(?:preply-|jaffer-preply-|rev-preply-)/i.test(doc.id);
-                if (isManagedPreplyReview && !incomingIds.has(doc.id)) {
-                    batch.delete(doc.ref);
-                    writeCount += 1;
-                }
-            });
-        }
+        let removedCount = 0;
+        snapshot.docs.forEach((doc) => {
+            const source = String((doc.data() || {}).source || "");
+            const isLegacyPreplyReview = /^(?:jaffer-preply-|rev-preply-)/i.test(doc.id);
+            const isMissingCurrentPreplyReview = source === "Preply" && !incomingIds.has(doc.id);
+            if (isLegacyPreplyReview || (rebuild && isMissingCurrentPreplyReview)) {
+                batch.delete(doc.ref);
+                writeCount += 1;
+                removedCount += 1;
+            }
+        });
         result.reviews.forEach((review) => {
             const existing = existingById.get(review.id);
             const comparable = (value = {}) => JSON.stringify([value.name, value.rating, value.date, value.text, value.source, value.createdAt, value.preplyOrder]);
@@ -6836,7 +6837,7 @@ function wireTeacherActions() {
         state.reviews = [...result.reviews, ...websiteReviews];
         saveLocalReviews("teacher_reviews_v1", state.reviews);
         renderReviewsUi();
-        return { total: result.reviews.length, writes: writeCount, newCount, updatedCount };
+        return { total: result.reviews.length, writes: writeCount, newCount, updatedCount, removedCount };
     };
 
     els.syncPreplyReviewsBtn?.addEventListener("click", async (event) => {
@@ -6844,7 +6845,7 @@ function wireTeacherActions() {
             await withButtonLoading(event.currentTarget, "Syncing...", async () => {
                 const summary = await syncPreplyReviews(false);
                 const message = summary.writes
-                    ? `${summary.newCount} new and ${summary.updatedCount} updated reviews synced. ${summary.total} total on Preply.`
+                    ? `${summary.newCount} new, ${summary.updatedCount} updated, and ${summary.removedCount} duplicate/old reviews removed. ${summary.total} total on Preply.`
                     : `Already up to date. ${summary.total} Preply reviews; no Firebase writes needed.`;
                 setStatus(els.preplyReviewsSyncMsg, message, "success");
             });
