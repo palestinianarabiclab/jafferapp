@@ -1544,12 +1544,13 @@ async function loadPublicSettings({ force = false } = {}) {
 function updateStudentOfferUi() {
     const offers = state.bookingSettings.courseOffers || {};
     const lessonPrice = getConfiguredLessonPrice();
-    const rateText = "Private lesson pricing is managed by the teacher";
+    const configuredRateText = String(state.profileSettings?.rateText || "").trim();
+    const rateText = configuredRateText
+        ? (/^regular rate\s*:/i.test(configuredRateText) ? configuredRateText : `Regular rate: ${configuredRateText}`)
+        : "Rate set by teacher";
     const lessonRateDisplay = document.getElementById("lessonRateDisplay");
     if (lessonRateDisplay) lessonRateDisplay.textContent = rateText;
-    if (els.preplyRateDisplay && !state.profileSettings?.rateText) {
-        els.preplyRateDisplay.textContent = rateText;
-    }
+    if (els.preplyRateDisplay) els.preplyRateDisplay.textContent = rateText;
     if (els.studentPaypalReminder) {
         const reminder = offers.paypalReminder ||
             "Just a quick reminder: when you choose to pay through PayPal, please choose Goods and Services. Choosing another option may affect my PayPal account.";
@@ -6450,7 +6451,12 @@ function renderProfileUi() {
             }
         }, 50);
     }
-    if (els.preplyRateDisplay) els.preplyRateDisplay.textContent = p.rateText ? `Regular rate: ${p.rateText}` : "Rate set by teacher";
+    if (els.preplyRateDisplay) {
+        const configuredRateText = String(p.rateText || "").trim();
+        els.preplyRateDisplay.textContent = configuredRateText
+            ? (/^regular rate\s*:/i.test(configuredRateText) ? configuredRateText : `Regular rate: ${configuredRateText}`)
+            : "Rate set by teacher";
+    }
 
     if (els.preplyAvatarContainer) {
         const avatarStr = (p.avatarUrl || "").trim();
@@ -6806,10 +6812,6 @@ async function refreshTeacherStudents() {
         const migrationAlreadyComplete = migrationMarkerSnap.exists && migrationMarkerSnap.data()?.complete === true;
         if (!state.privateAccountingMigrated && !migrationAlreadyComplete) {
             await migrateLegacyBookingAccounting();
-            await window.db.collection("teacherProfile").doc("primary").set({
-                rateText: window.firebase.firestore.FieldValue.delete(),
-                updatedAt: Date.now(),
-            }, { merge: true });
             state.privateAccountingMigrated = true;
         } else if (migrationAlreadyComplete) {
             state.privateAccountingMigrated = true;
@@ -7554,10 +7556,6 @@ function wireTeacherActions() {
                         updatedAt: Date.now(),
                     }, { merge: true });
                 }
-                await window.db.collection("teacherProfile").doc("primary").set({
-                    rateText: window.firebase.firestore.FieldValue.delete(),
-                    updatedAt: Date.now(),
-                }, { merge: true });
                 renderProfileUi();
                 updateStudentOfferUi();
                 setStatus(els.teacherProfileMsg, "Profile settings saved successfully!", "success");

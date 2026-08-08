@@ -34,3 +34,9 @@ test("a refund restores whole lessons using the student's effective lesson price
     assert.match(app, /lessonCreditAdjustment:\s*isPayment \? 0 : restoredLessons/);
     assert.match(app, /lessonCreditsAfter/);
 });
+test("Regular Rate Display remains public and is not replaced by a fixed private-pricing message", () => {
+    assert.doesNotMatch(app, /Private lesson pricing is managed by the teacher/);
+    assert.match(app, /lessonRateDisplay\.textContent = rateText/);
+    assert.match(app, /els\.preplyRateDisplay\.textContent = rateText/);
+    assert.doesNotMatch(app, /rateText:\s*window\.firebase\.firestore\.FieldValue\.delete/);
+});
