@@ -113,6 +113,8 @@ function sendBookingNotificationEmail_(recipient, details) {
     'Email: ' + (details.email || ''),
     'Phone: ' + (details.phone || ''),
     'Slot: ' + (details.slotLabel || ''),
+    'Duration: ' + (details.durationMinutes || 50) + ' minutes',
+    'Lesson type: ' + (details.lessonType || 'Lesson'),
     'Timezone: ' + (details.timeZone || ''),
     'Booking ID: ' + (details.bookingId || ''),
     details.meetingUrl ? 'Google Meet: ' + details.meetingUrl : '',
@@ -150,6 +152,7 @@ function sendStudentConfirmationEmail_(recipient, details) {
     'Your lesson has been booked successfully.',
     '',
     'Date & time: ' + (details.slotLabel || ''),
+    'Duration: ' + (details.durationMinutes || 50) + ' minutes',
     'Teacher timezone: ' + (details.timeZone || ''),
     'Booking ID: ' + (details.bookingId || ''),
     details.meetingUrl ? 'Join lesson: ' + details.meetingUrl : '',
@@ -178,6 +181,33 @@ function sendStudentScheduleUpdateEmail_(recipient, details) {
     'Thank you.'
   ].join('\n');
   return sendPlainEmail_(recipient, subject, body);
+}
+
+function sendTeacherScheduleUpdateEmail_(recipient, details) {
+  return sendPlainEmail_(recipient, 'Lesson schedule updated: ' + (details.name || 'Student'), [
+    'A lesson schedule was updated.', '',
+    'Updated by: ' + (details.actor || 'Teacher'),
+    'Student: ' + (details.name || ''),
+    'Email: ' + (details.email || ''),
+    'New date & time: ' + (details.slotLabel || ''),
+    'Duration: ' + (details.durationMinutes || 50) + ' minutes',
+    'Timezone: ' + (details.timeZone || ''),
+    'Booking ID: ' + (details.bookingId || ''),
+    details.meetingUrl ? 'Google Meet: ' + details.meetingUrl : ''
+  ].join('\n'));
+}
+
+function sendStudentCancellationEmail_(recipient, details) {
+  const actor = details.actor === 'system' ? 'the calendar synchronization system' : 'your teacher';
+  return sendPlainEmail_(recipient, 'Your lesson was canceled', [
+    'Hello ' + (details.name || 'Student') + ',', '',
+    'Your lesson was canceled by ' + actor + '.', '',
+    'Date & time: ' + (details.slotLabel || ''),
+    'Duration: ' + (details.durationMinutes || 50) + ' minutes',
+    'Timezone: ' + (details.timeZone || ''),
+    'Booking ID: ' + (details.bookingId || ''), '',
+    'The cancellation is also visible in your student account.'
+  ].join('\n'));
 }
 
 function sendReviewRequestEmail_(recipient, details) {
@@ -302,10 +332,12 @@ function sendUpcomingLessonReminders() {
 }
 
 function installLessonReminderTrigger() {
+  const calendarResult = installCalendarSyncTrigger();
   return {
-    success: true,
+    success: calendarResult.success,
     manualSetupRequired: false,
-    message: 'No reminder trigger is required. Google Calendar sends the built-in 15-minute reminder.',
+    triggerInstalled: calendarResult.triggerInstalled,
+    message: 'Google Calendar handles lesson reminders. ' + calendarResult.message,
   };
 }
 
@@ -463,6 +495,639 @@ function fsNumber_(doc, name) {
   if (value.integerValue !== undefined) return Number(value.integerValue || 0);
   if (value.doubleValue !== undefined) return Number(value.doubleValue || 0);
   return 0;
+}
+
+function fsBool_(doc, name) {
+  const value = fsField_(doc, name);
+  return !!(value && value.booleanValue === true);
+}
+
+function fsStringArray_(doc, name) {
+  const value = fsField_(doc, name);
+  const values = value && value.arrayValue && value.arrayValue.values;
+  return (values || []).map(function (item) { return String(item.stringValue || ''); }).filter(String);
+}
+
+function firestoreIamRequest_(config, path, options) {
+  const response = UrlFetchApp.fetch(firestoreBaseUrl_(config.firebaseProjectId) + path, Object.assign({
+    muteHttpExceptions: true,
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+  }, options || {}));
+  const text = response.getContentText();
+  const data = text ? JSON.parse(text) : {};
+  if (response.getResponseCode() >= 300) {
+    throw new Error(data.error && data.error.message ? data.error.message : 'Firestore IAM request failed (' + response.getResponseCode() + ').');
+  }
+  return data;
+}
+
+function fsValue_(value) {
+  if (value === null || value === undefined) return { nullValue: null };
+  if (Array.isArray(value)) return { arrayValue: { values: value.map(fsValue_) } };
+  if (typeof value === 'boolean') return { booleanValue: value };
+  if (typeof value === 'number') {
+    return Number.isInteger(value) ? { integerValue: String(value) } : { doubleValue: value };
+  }
+  if (typeof value === 'object') {
+    const fields = {};
+    Object.keys(value).forEach(function (key) { fields[key] = fsValue_(value[key]); });
+    return { mapValue: { fields: fields } };
+  }
+  return { stringValue: String(value) };
+}
+
+function firestoreIamPatch_(config, collection, docId, values) {
+  const fields = {};
+  const masks = [];
+  Object.keys(values).forEach(function (key) {
+    fields[key] = fsValue_(values[key]);
+    masks.push('updateMask.fieldPaths=' + encodeURIComponent(key));
+  });
+  return firestoreIamRequest_(config, '/' + encodeURIComponent(collection) + '/' + encodeURIComponent(docId) + '?' + masks.join('&'), {
+    method: 'patch',
+    contentType: 'application/json',
+    payload: JSON.stringify({ fields: fields }),
+  });
+}
+
+function firestoreIamDelete_(config, collection, docId) {
+  try {
+    return firestoreIamRequest_(config, '/' + encodeURIComponent(collection) + '/' + encodeURIComponent(docId), { method: 'delete' });
+  } catch (err) {
+    if (String(err.message || err).toLowerCase().indexOf('not found') !== -1) return {};
+    throw err;
+  }
+}
+
+function firestoreIamCreateClaim_(config, claimId, values) {
+  const fields = {};
+  Object.keys(values).forEach(function (key) { fields[key] = fsValue_(values[key]); });
+  return firestoreIamRequest_(config, '/bookingSlotClaims/' + encodeURIComponent(claimId) + '?currentDocument.exists=false', {
+    method: 'patch',
+    contentType: 'application/json',
+    payload: JSON.stringify({ fields: fields }),
+  });
+}
+
+function listFirestoreBookingsIam_(config) {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  const result = firestoreIamRequest_(config, ':runQuery', {
+    method: 'post', contentType: 'application/json',
+    payload: JSON.stringify({ structuredQuery: {
+      from: [{ collectionId: 'bookings' }],
+      where: { fieldFilter: { field: { fieldPath: 'slot' }, op: 'GREATER_THAN_OR_EQUAL', value: fsValue_(cutoff) } },
+      orderBy: [{ field: { fieldPath: 'slot' }, direction: 'ASCENDING' }],
+      limit: 1000
+    } })
+  });
+  return (result || []).map(function (row) { return row.document; }).filter(Boolean);
+}
+
+const NOTIFICATION_MAX_ATTEMPTS_ = 8;
+
+function listNotificationJobsIam_(config, onlyBookingId) {
+  const filter = onlyBookingId
+    ? { fieldFilter: { field: { fieldPath: 'bookingId' }, op: 'EQUAL', value: fsValue_(onlyBookingId) } }
+    : { fieldFilter: {
+        field: { fieldPath: 'state' }, op: 'IN',
+        value: { arrayValue: { values: [fsValue_('pending'), fsValue_('failed'), fsValue_('sending')] } }
+      } };
+  const result = firestoreIamRequest_(config, ':runQuery', {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify({ structuredQuery: {
+      from: [{ collectionId: 'notificationJobs' }],
+      where: filter,
+      limit: 250
+    } })
+  });
+  return (result || []).map(function (row) { return row.document; }).filter(Boolean);
+}
+
+function firestoreIamGetOptional_(config, collection, docId) {
+  try {
+    return firestoreIamRequest_(config, '/' + encodeURIComponent(collection) + '/' + encodeURIComponent(docId), { method: 'get' });
+  } catch (err) {
+    if (/not found/i.test(String(err && err.message || err))) return null;
+    throw err;
+  }
+}
+
+function validLessonPrice_(value) {
+  const price = Number(value || 0);
+  return isFinite(price) && price > 0 && price <= 10000 ? Math.round(price * 100) / 100 : 0;
+}
+
+function ensureBookingAccountingSnapshot_(config, bookingId, booking) {
+  const existing = firestoreIamGetOptional_(config, 'bookingAccounting', bookingId);
+  if (existing) return existing;
+  const studentUid = fsString_(booking, 'studentUid');
+  const studentAccounting = studentUid ? firestoreIamGetOptional_(config, 'studentAccounting', studentUid) : null;
+  const teacherPricing = firestoreIamGetOptional_(config, 'teacherAccountingSettings', 'primary');
+  const legacyCustom = validLessonPrice_(fsNumber_(booking, 'lessonPrice'));
+  const customPrice = validLessonPrice_(fsNumber_(studentAccounting, 'customLessonPrice')) || legacyCustom;
+  const defaultPrice = validLessonPrice_(fsNumber_(teacherPricing, 'defaultLessonPrice'));
+  const effectivePrice = customPrice || defaultPrice;
+  if (!effectivePrice && !fsBool_(booking, 'isFreeTrial')) return null;
+  const snapshot = {
+    bookingId: bookingId,
+    studentUid: studentUid,
+    effectivePrice: fsBool_(booking, 'isFreeTrial') ? 0 : effectivePrice,
+    currency: 'USD',
+    pricingSource: fsBool_(booking, 'isFreeTrial') ? 'free-trial' : (customPrice ? 'custom' : 'default'),
+    defaultPriceAtBooking: defaultPrice || 0,
+    customPriceAtBooking: customPrice || 0,
+    capturedAt: Date.now(),
+    legacyPriceSource: legacyCustom > 0
+  };
+  firestoreIamPatch_(config, 'bookingAccounting', bookingId, snapshot);
+  return firestoreIamGetOptional_(config, 'bookingAccounting', bookingId);
+}
+
+function notificationRetryAt_(attempts) {
+  return Date.now() + Math.min(1440, Math.pow(2, Math.min(10, Math.max(0, Number(attempts || 0))))) * 60000;
+}
+
+function notificationSummaryPrefix_(recipientType) {
+  return recipientType === 'teacher' ? 'teacherNotification' : 'studentNotification';
+}
+
+function patchNotificationState_(config, jobId, bookingId, recipientType, values) {
+  firestoreIamPatch_(config, 'notificationJobs', jobId, values);
+  const prefix = notificationSummaryPrefix_(recipientType);
+  const summary = {};
+  Object.keys(values).forEach(function (key) {
+    const suffixes = { state: 'Status', attempts: 'Attempts', lastAttemptAt: 'LastAttemptAt', nextRetryAt: 'NextRetryAt', lastError: 'LastError', sentAt: 'SentAt' };
+    if (suffixes[key]) summary[prefix + suffixes[key]] = values[key];
+  });
+  if (Object.keys(summary).length) firestoreIamPatch_(config, 'bookings', bookingId, summary);
+}
+
+function notificationDetails_(config, bookingId, booking, job) {
+  const slot = fsNumber_(booking, 'slot');
+  const timeZone = fsString_(booking, 'timezone') || config.defaultTimeZone;
+  return {
+    bookingId: bookingId,
+    name: fsString_(booking, 'name') || 'Student',
+    email: fsString_(booking, 'email'),
+    phone: fsString_(booking, 'phone'),
+    notes: fsString_(booking, 'notes'),
+    slotLabel: slot ? Utilities.formatDate(new Date(slot), timeZone, 'yyyy-MM-dd HH:mm') : '',
+    durationMinutes: Math.max(1, fsNumber_(booking, 'durationMinutes') || 50),
+    timeZone: timeZone,
+    meetingUrl: fsString_(booking, 'meetingUrl'),
+    lessonType: fsBool_(booking, 'isFreeTrial') ? 'Free trial' : 'Paid lesson',
+    actor: fsString_(job, 'actor') || 'system',
+    canceledBy: fsString_(job, 'actor') || 'system'
+  };
+}
+
+function deliverNotificationJob_(config, job, booking) {
+  const jobId = bookingDocId_(job);
+  const bookingId = fsString_(job, 'bookingId');
+  const recipientType = fsString_(job, 'recipientType');
+  const recipient = normalizeEmail_(fsString_(job, 'recipientEmail'));
+  const type = fsString_(job, 'notificationType');
+  const state = fsString_(job, 'state');
+  const attempts = fsNumber_(job, 'attempts');
+  const now = Date.now();
+  if (state === 'sent' || state === 'skipped') return { state: state, attempted: false };
+  if (state === 'sending') {
+    if (now - fsNumber_(job, 'lastAttemptAt') > 30 * 60 * 1000) {
+      patchNotificationState_(config, jobId, bookingId, recipientType, { state: 'failed', nextRetryAt: 0, lastError: 'Delivery outcome is unknown; manual review is required to avoid a duplicate email.' });
+    }
+    return { state: 'sending', attempted: false };
+  }
+  if (attempts >= NOTIFICATION_MAX_ATTEMPTS_ || (fsNumber_(job, 'nextRetryAt') && fsNumber_(job, 'nextRetryAt') > now)) return { state: state, attempted: false };
+  if (!isValidEmail_(recipient)) {
+    patchNotificationState_(config, jobId, bookingId, recipientType, { state: 'skipped', nextRetryAt: 0, lastError: 'Missing or invalid ' + recipientType + ' email.' });
+    return { state: 'skipped', attempted: false };
+  }
+  if (type === 'reschedule' && fsNumber_(booking, 'rescheduledAt') > fsNumber_(job, 'operationVersion')) {
+    patchNotificationState_(config, jobId, bookingId, recipientType, { state: 'skipped', nextRetryAt: 0, lastError: 'Superseded by a newer reschedule.' });
+    return { state: 'skipped', attempted: false };
+  }
+  if (type === 'created' && !fsString_(booking, 'meetingUrl')) return { state: state, attempted: false, waitingForMeet: true };
+  const nextAttempts = attempts + 1;
+  patchNotificationState_(config, jobId, bookingId, recipientType, { state: 'sending', attempts: nextAttempts, lastAttemptAt: now, nextRetryAt: 0, lastError: '' });
+  try {
+    const details = notificationDetails_(config, bookingId, booking, job);
+    let sent = false;
+    if (type === 'created' && recipientType === 'teacher') sent = sendBookingNotificationEmail_(recipient, details);
+    else if (type === 'created') sent = sendStudentConfirmationEmail_(recipient, details);
+    else if (type === 'reschedule' && recipientType === 'teacher') sent = sendTeacherScheduleUpdateEmail_(recipient, details);
+    else if (type === 'reschedule') sent = sendStudentScheduleUpdateEmail_(recipient, details);
+    else if (type === 'cancellation' && recipientType === 'teacher') sent = sendBookingCancellationEmail_(recipient, details);
+    else if (type === 'cancellation') sent = sendStudentCancellationEmail_(recipient, details);
+    else throw new Error('Unsupported notification type: ' + type + '.');
+    if (!sent) throw new Error('MailApp did not accept the notification.');
+    patchNotificationState_(config, jobId, bookingId, recipientType, { state: 'sent', attempts: nextAttempts, sentAt: Date.now(), lastAttemptAt: now, nextRetryAt: 0, lastError: '' });
+    return { state: 'sent', attempted: true };
+  } catch (err) {
+    const errorText = String(err && err.message ? err.message : err || 'Email delivery failed.').slice(0, 1000);
+    patchNotificationState_(config, jobId, bookingId, recipientType, { state: 'failed', attempts: nextAttempts, lastAttemptAt: now, nextRetryAt: nextAttempts >= NOTIFICATION_MAX_ATTEMPTS_ ? 0 : notificationRetryAt_(nextAttempts), lastError: errorText });
+    return { state: 'failed', attempted: true, error: errorText };
+  }
+}
+
+function processPendingNotificationJobs_(config, onlyBookingId) {
+  const summary = { checked: 0, sent: 0, failed: 0, skipped: 0, teacherSent: false, studentSent: false, errors: [] };
+  listNotificationJobsIam_(config, onlyBookingId).forEach(function (job) {
+    const bookingId = fsString_(job, 'bookingId');
+    if (onlyBookingId && bookingId !== onlyBookingId) return;
+    const state = fsString_(job, 'state');
+    if (state === 'sent' || state === 'skipped') {
+      if (state === 'sent') summary[fsString_(job, 'recipientType') + 'Sent'] = true;
+      return;
+    }
+    const booking = firestoreIamGetOptional_(config, 'bookings', bookingId);
+    if (!booking) return;
+    summary.checked += 1;
+    const result = deliverNotificationJob_(config, job, booking);
+    if (result.state === 'sent') { summary.sent += 1; summary[fsString_(job, 'recipientType') + 'Sent'] = true; }
+    if (result.state === 'failed') { summary.failed += 1; if (result.error) summary.errors.push(result.error); }
+    if (result.state === 'skipped') summary.skipped += 1;
+  });
+  return summary;
+}
+
+function notificationJobId_(bookingId, type, version, recipientType) {
+  return ['booking', bookingId, type, Math.trunc(Number(version || 0)), recipientType].map(function (part) {
+    return String(part).replace(/[^a-zA-Z0-9_-]/g, '_');
+  }).join('_');
+}
+
+function ensureNotificationJobIam_(config, bookingId, type, version, recipientType, recipientEmail, actor) {
+  const id = notificationJobId_(bookingId, type, version, recipientType);
+  if (firestoreIamGetOptional_(config, 'notificationJobs', id)) return id;
+  const email = normalizeEmail_(recipientEmail);
+  const valid = isValidEmail_(email);
+  const fields = {
+    bookingId: bookingId, recipientType: recipientType, recipientEmail: email,
+    notificationType: type, operationVersion: Number(version || 0), actor: actor || 'system',
+    state: valid ? 'pending' : 'skipped', attempts: 0, createdAt: Date.now(), sentAt: 0,
+    lastAttemptAt: 0, nextRetryAt: valid ? Date.now() : 0,
+    lastError: valid ? '' : 'Missing or invalid ' + recipientType + ' email.', idempotencyKey: id
+  };
+  try {
+    const encoded = {};
+    Object.keys(fields).forEach(function (key) { encoded[key] = fsValue_(fields[key]); });
+    firestoreIamRequest_(config, '/notificationJobs/' + encodeURIComponent(id) + '?currentDocument.exists=false', {
+      method: 'patch', contentType: 'application/json', payload: JSON.stringify({ fields: encoded })
+    });
+  } catch (err) {
+    if (!/already exists|condition/i.test(String(err && err.message || err))) throw err;
+  }
+  return id;
+}
+
+function bookingDocId_(doc) {
+  const parts = String(doc && doc.name || '').split('/');
+  return parts[parts.length - 1] || '';
+}
+
+function getIntervalClaimIds_(slot, durationMinutes) {
+  const bucketMinutes = 5;
+  const bucketMs = bucketMinutes * 60 * 1000;
+  const start = Number(slot || 0);
+  const end = start + Math.max(1, Number(durationMinutes || 50)) * 60 * 1000;
+  if (!start) return [];
+  const result = ['slot_' + Math.trunc(start)];
+  for (let bucket = Math.floor(start / bucketMs); bucket <= Math.floor((end - 1) / bucketMs); bucket += 1) {
+    result.push('interval_' + bucketMinutes + '_' + bucket);
+  }
+  return result;
+}
+
+function calendarRetryAt_(attempts) {
+  const minutes = Math.min(1440, Math.pow(2, Math.min(8, Math.max(0, Number(attempts || 0)))));
+  return Date.now() + minutes * 60 * 1000;
+}
+
+function patchCalendarFailure_(config, bookingId, attempts, err, state) {
+  firestoreIamPatch_(config, 'bookings', bookingId, {
+    calendarSynced: false,
+    calendarSyncState: state || 'failed',
+    calendarSyncAttempts: attempts,
+    calendarSyncLastAttemptAt: Date.now(),
+    calendarNextRetryAt: calendarRetryAt_(attempts),
+    calendarSyncLastError: String(err && err.message ? err.message : err || '').slice(0, 1000),
+    updatedAt: Date.now(),
+  });
+}
+
+function createOrReuseCalendarEventForWorker_(config, bookingId, booking) {
+  const cal = CalendarApp.getCalendarById(config.primaryCalendarId);
+  const slot = fsNumber_(booking, 'slot');
+  const duration = Math.max(15, fsNumber_(booking, 'durationMinutes') || 50);
+  const matchingEvents = findBookingEvents_(cal, bookingId, slot);
+  if (matchingEvents.length > 1) {
+    throw new Error('Duplicate Calendar events detected for Booking ID ' + bookingId + '; automatic creation stopped for manual cleanup.');
+  }
+  const existing = findBookingEvent_(cal, fsString_(booking, 'googleCalendarEventId'), bookingId, slot);
+  if (existing) {
+    let meetingUrl = '';
+    try { meetingUrl = existing.getHangoutLink() || ''; } catch (err) {}
+    const repaired = meetingUrl ? null : ensureBookingMeetingLink_(config, bookingId, slot);
+    return {
+      eventId: repaired && repaired.eventId || existing.getId(),
+      meetingUrl: repaired && repaired.meetingUrl || meetingUrl,
+      reused: true,
+    };
+  }
+  const start = new Date(slot);
+  const end = new Date(slot + duration * 60000);
+  if (hasConflictingEvent_(getBusyCalendarIds_(config), start, end)) {
+    throw new Error('Calendar conflict: that time is occupied.');
+  }
+  const name = fsString_(booking, 'name') || 'Student';
+  const description = [
+    'Booked from Jaffer Booking',
+    'Booking ID: ' + bookingId,
+    'Student: ' + name,
+    'Email: ' + fsString_(booking, 'email'),
+    'Phone: ' + fsString_(booking, 'phone'),
+    'Notes: ' + fsString_(booking, 'notes'),
+    'Timezone: ' + (fsString_(booking, 'timezone') || config.defaultTimeZone),
+  ].join('\n');
+  const event = Calendar.Events.insert({
+    summary: 'Lesson with ' + name,
+    description: description,
+    start: { dateTime: start.toISOString(), timeZone: fsString_(booking, 'timezone') || config.defaultTimeZone },
+    end: { dateTime: end.toISOString(), timeZone: fsString_(booking, 'timezone') || config.defaultTimeZone },
+    conferenceData: { createRequest: { requestId: 'jaffer-' + bookingId + '-' + slot, conferenceSolutionKey: { type: 'hangoutsMeet' } } },
+  }, config.primaryCalendarId, { conferenceDataVersion: 1, sendUpdates: 'none' });
+  const meetingUrl = event.hangoutLink || ((((event.conferenceData || {}).entryPoints || []).filter(function (entry) { return entry.entryPointType === 'video'; })[0] || {}).uri || '');
+  return { eventId: event.id || event.iCalUID, meetingUrl: meetingUrl, reused: false };
+}
+
+function releaseBookingClaimsIam_(config, booking) {
+  const claimIds = fsStringArray_(booking, 'slotClaimIds');
+  const ids = claimIds.length ? claimIds : ['slot_' + Math.trunc(fsNumber_(booking, 'slot'))];
+  ids.forEach(function (claimId) { if (claimId) firestoreIamDelete_(config, 'bookingSlotClaims', claimId); });
+  const reservationClaimId = fsString_(booking, 'reservationClaimId');
+  if (reservationClaimId) firestoreIamDelete_(config, 'lessonCreditClaims', reservationClaimId);
+  if (fsBool_(booking, 'isFreeTrial')) {
+    const studentUid = fsString_(booking, 'studentUid');
+    if (studentUid) {
+      firestoreIamDelete_(config, 'trialClaims', studentUid);
+      firestoreIamPatch_(config, 'users', studentUid, { trialUsed: false, updatedAt: Date.now() });
+    }
+  }
+}
+
+function ensureBookingClaimsIam_(config, bookingId, booking) {
+  const slot = fsNumber_(booking, 'slot');
+  const duration = Math.max(1, fsNumber_(booking, 'durationMinutes') || 50);
+  const expected = getIntervalClaimIds_(slot, duration);
+  const current = fsStringArray_(booking, 'slotClaimIds');
+  if (current.length && expected.every(function (id) { return current.indexOf(id) !== -1; })) return current;
+  const created = [];
+  try {
+    expected.forEach(function (claimId) {
+      let owner = '';
+      try { owner = fsString_(firestoreIamRequest_(config, '/bookingSlotClaims/' + encodeURIComponent(claimId), { method: 'get' }), 'bookingId'); } catch (err) {}
+      if (owner === bookingId) return;
+      if (owner) throw new Error('Legacy booking overlaps another platform booking claim.');
+      firestoreIamCreateClaim_(config, claimId, {
+        bookingId: bookingId,
+        studentUid: fsString_(booking, 'studentUid'),
+        slot: slot,
+        endAt: slot + duration * 60000,
+        claimType: claimId.indexOf('interval_') === 0 ? 'interval' : 'anchor',
+        createdAt: Date.now(),
+        migratedFromLegacy: true,
+      });
+      created.push(claimId);
+    });
+  } catch (err) {
+    created.forEach(function (claimId) { firestoreIamDelete_(config, 'bookingSlotClaims', claimId); });
+    throw err;
+  }
+  firestoreIamPatch_(config, 'bookings', bookingId, {
+    slotClaimIds: expected,
+    consumeAfter: slot + duration * 60000,
+    updatedAt: Date.now(),
+  });
+  return expected;
+}
+
+function reconcileExternalCalendarChange_(config, bookingId, booking, event) {
+  const oldSlot = fsNumber_(booking, 'slot');
+  const oldDuration = Math.max(1, fsNumber_(booking, 'durationMinutes') || 50);
+  const newSlot = event.getStartTime().getTime();
+  const newDuration = Math.max(1, Math.round((event.getEndTime().getTime() - newSlot) / 60000));
+  let meetingUrl = '';
+  try { meetingUrl = event.getHangoutLink() || ''; } catch (err) {}
+  if (oldSlot === newSlot && oldDuration === newDuration && meetingUrl === fsString_(booking, 'meetingUrl')) {
+    firestoreIamPatch_(config, 'bookings', bookingId, { calendarLastCheckedAt: Date.now() });
+    return 'unchanged';
+  }
+  const oldClaims = fsStringArray_(booking, 'slotClaimIds');
+  const newClaims = getIntervalClaimIds_(newSlot, newDuration);
+  newClaims.forEach(function (claimId) {
+    try {
+      const claim = firestoreIamRequest_(config, '/bookingSlotClaims/' + encodeURIComponent(claimId), { method: 'get' });
+      const owner = fsString_(claim, 'bookingId');
+      if (owner && owner !== bookingId) throw new Error('Externally moved lesson overlaps another platform booking.');
+    } catch (err) {
+      if (String(err.message || err).toLowerCase().indexOf('not found') === -1) throw err;
+    }
+  });
+  const createdClaimIds = [];
+  try {
+    newClaims.forEach(function (claimId) {
+      let existingOwner = '';
+      try {
+        existingOwner = fsString_(firestoreIamRequest_(config, '/bookingSlotClaims/' + encodeURIComponent(claimId), { method: 'get' }), 'bookingId');
+      } catch (err) {}
+      if (existingOwner === bookingId) return;
+      firestoreIamCreateClaim_(config, claimId, {
+        bookingId: bookingId,
+        studentUid: fsString_(booking, 'studentUid'),
+        slot: newSlot,
+        endAt: newSlot + newDuration * 60000,
+        claimType: claimId.indexOf('interval_') === 0 ? 'interval' : 'anchor',
+        createdAt: Date.now(),
+      });
+      createdClaimIds.push(claimId);
+    });
+  } catch (claimError) {
+    createdClaimIds.forEach(function (claimId) { firestoreIamDelete_(config, 'bookingSlotClaims', claimId); });
+    throw claimError;
+  }
+  oldClaims.forEach(function (claimId) { if (newClaims.indexOf(claimId) === -1) firestoreIamDelete_(config, 'bookingSlotClaims', claimId); });
+  const update = {
+    slot: newSlot,
+    durationMinutes: newDuration,
+    consumeAfter: newSlot + newDuration * 60000,
+    slotClaimIds: newClaims,
+    meetingUrl: meetingUrl,
+    googleCalendarEventId: event.getId(),
+    calendarSynced: true,
+    calendarSyncState: 'externally-modified',
+    calendarLastCheckedAt: Date.now(),
+    calendarLastSyncedAt: Date.now(),
+    calendarSyncLastError: '',
+    updatedAt: Date.now(),
+  };
+  firestoreIamPatch_(config, 'bookings', bookingId, update);
+  firestoreIamPatch_(config, 'publicBookings', bookingId, {
+    slot: newSlot,
+    durationMinutes: newDuration,
+    status: fsString_(booking, 'status') || 'booked',
+    calendarSynced: true,
+    updatedAt: Date.now(),
+  });
+  return 'updated';
+}
+
+function runCalendarSyncWorker() {
+  const config = getConfig_();
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(1000)) return { success: true, skipped: true, message: 'Calendar sync worker is already running.' };
+  const summary = { success: true, checked: 0, created: 0, reused: 0, deleted: 0, reconciled: 0, externallyDeleted: 0, failed: 0 };
+  try {
+    const bookings = listFirestoreBookingsIam_(config);
+    const cal = CalendarApp.getCalendarById(config.primaryCalendarId);
+    const scanStart = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const scanEnd = new Date(Date.now() + 367 * 24 * 60 * 60 * 1000);
+    const platformEventsByBooking = {};
+    cal.getEvents(scanStart, scanEnd).forEach(function (event) {
+      const details = parseEventDetails_(event, config);
+      if (!details.bookingId) return;
+      if (!platformEventsByBooking[details.bookingId]) platformEventsByBooking[details.bookingId] = [];
+      platformEventsByBooking[details.bookingId].push(event);
+    });
+    bookings.forEach(function (booking) {
+      const bookingId = bookingDocId_(booking);
+      const status = fsString_(booking, 'status') || 'booked';
+      const syncState = fsString_(booking, 'calendarSyncState');
+      const attempts = fsNumber_(booking, 'calendarSyncAttempts');
+      const nextRetryAt = fsNumber_(booking, 'calendarNextRetryAt');
+      const lessonEnd = fsNumber_(booking, 'consumeAfter') ||
+        (fsNumber_(booking, 'slot') + Math.max(1, fsNumber_(booking, 'durationMinutes') || 50) * 60000);
+      summary.checked += 1;
+      try {
+        if (status !== 'canceled') ensureBookingAccountingSnapshot_(config, bookingId, booking);
+        if (status !== 'canceled' && lessonEnd > Date.now()) {
+          ensureBookingClaimsIam_(config, bookingId, booking);
+        }
+        if (status === 'canceled' || syncState === 'pending-delete' || fsBool_(booking, 'calendarDeletePending')) {
+          if (nextRetryAt && nextRetryAt > Date.now()) return;
+          const event = findBookingEvent_(cal, fsString_(booking, 'googleCalendarEventId'), bookingId, fsNumber_(booking, 'slot'));
+          if (event) event.deleteEvent();
+          firestoreIamPatch_(config, 'bookings', bookingId, {
+            calendarSynced: false,
+            calendarDeletePending: false,
+            calendarSyncState: 'externally-deleted',
+            calendarLastCheckedAt: Date.now(),
+            calendarLastSyncedAt: Date.now(),
+            calendarNextRetryAt: 0,
+            calendarSyncLastError: '',
+            updatedAt: Date.now(),
+          });
+          summary.deleted += 1;
+          return;
+        }
+        if (lessonEnd > Date.now() && (syncState === 'pending-create' || syncState === 'failed' || (!syncState && fsBool_(booking, 'calendarSynced') === false))) {
+          if (nextRetryAt && nextRetryAt > Date.now()) return;
+          const result = createOrReuseCalendarEventForWorker_(config, bookingId, booking);
+          firestoreIamPatch_(config, 'bookings', bookingId, {
+            googleCalendarEventId: result.eventId || '',
+            meetingUrl: result.meetingUrl || '',
+            calendarSynced: true,
+            calendarSyncState: 'synced',
+            calendarLastSyncedAt: Date.now(),
+            calendarLastCheckedAt: Date.now(),
+            calendarSyncAttempts: attempts + 1,
+            calendarNextRetryAt: 0,
+            calendarSyncLastError: '',
+            updatedAt: Date.now(),
+          });
+          firestoreIamPatch_(config, 'publicBookings', bookingId, { calendarSynced: true, updatedAt: Date.now() });
+          result.reused ? summary.reused += 1 : summary.created += 1;
+          return;
+        }
+        if (syncState === 'pending-update') {
+          if (nextRetryAt && nextRetryAt > Date.now()) return;
+          const updateEvent = findBookingEvent_(cal, fsString_(booking, 'googleCalendarEventId'), bookingId, fsNumber_(booking, 'slot'));
+          if (!updateEvent) throw new Error('Calendar event was not found for pending update.');
+          const updateSlot = fsNumber_(booking, 'slot');
+          const updateDuration = Math.max(1, fsNumber_(booking, 'durationMinutes') || 50);
+          updateEvent.setTime(new Date(updateSlot), new Date(updateSlot + updateDuration * 60000));
+          let updateMeet = '';
+          try { updateMeet = updateEvent.getHangoutLink() || ''; } catch (meetErr) {}
+          firestoreIamPatch_(config, 'bookings', bookingId, {
+            googleCalendarEventId: updateEvent.getId(),
+            meetingUrl: updateMeet,
+            calendarSynced: true,
+            calendarSyncState: 'synced',
+            calendarLastSyncedAt: Date.now(),
+            calendarLastCheckedAt: Date.now(),
+            calendarSyncAttempts: attempts + 1,
+            calendarNextRetryAt: 0,
+            calendarSyncLastError: '',
+            updatedAt: Date.now(),
+          });
+          summary.reconciled += 1;
+          return;
+        }
+        if (lessonEnd <= Date.now()) {
+          firestoreIamPatch_(config, 'bookings', bookingId, { calendarLastCheckedAt: Date.now() });
+          return;
+        }
+        const mappedEvents = platformEventsByBooking[bookingId] || [];
+        if (mappedEvents.length > 1) throw new Error('Duplicate Calendar events detected for Booking ID ' + bookingId + '.');
+        const event = mappedEvents[0] || null;
+        if (!event) {
+          const canceledAt = Date.now();
+          releaseBookingClaimsIam_(config, booking);
+          firestoreIamPatch_(config, 'bookings', bookingId, {
+            status: 'canceled',
+            canceledAt: canceledAt,
+            canceledBy: 'system',
+            reservationState: fsBool_(booking, 'isFreeTrial') ? 'not-required' : 'released',
+            calendarSynced: false,
+            calendarDeletePending: false,
+            calendarSyncState: 'externally-deleted',
+            calendarLastCheckedAt: canceledAt,
+            calendarSyncLastError: '',
+            updatedAt: canceledAt,
+          });
+          firestoreIamPatch_(config, 'publicBookings', bookingId, { status: 'canceled', calendarSynced: false, updatedAt: canceledAt });
+          ensureNotificationJobIam_(config, bookingId, 'cancellation', canceledAt, 'teacher', '', 'system');
+          ensureNotificationJobIam_(config, bookingId, 'cancellation', canceledAt, 'student', fsString_(booking, 'email'), 'system');
+          firestoreIamPatch_(config, 'bookings', bookingId, {
+            teacherNotificationStatus: 'skipped',
+            studentNotificationStatus: isValidEmail_(fsString_(booking, 'email')) ? 'pending' : 'skipped',
+            notificationOperationVersion: canceledAt,
+          });
+          summary.externallyDeleted += 1;
+          return;
+        }
+        if (reconcileExternalCalendarChange_(config, bookingId, booking, event) === 'updated') summary.reconciled += 1;
+      } catch (err) {
+        summary.failed += 1;
+        const failureState = /(overlap|duplicate|conflict)/i.test(String(err.message || err))
+          ? 'conflict'
+          : (syncState === 'externally-modified' ? 'externally-modified' : 'failed');
+        patchCalendarFailure_(config, bookingId, attempts + 1, err, failureState);
+      }
+    });
+    summary.notifications = processPendingNotificationJobs_(config);
+    return summary;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function installCalendarSyncTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (trigger) {
+    if (trigger.getHandlerFunction() === 'runCalendarSyncWorker') ScriptApp.deleteTrigger(trigger);
+  });
+  ScriptApp.newTrigger('runCalendarSyncWorker').timeBased().everyMinutes(5).create();
+  return { success: true, triggerInstalled: true, message: 'Automatic Calendar/Firestore sync installed (every 5 minutes).' };
 }
 
 function parseCalendarIds_(value) {
@@ -642,12 +1307,16 @@ function listEvents_(calendarId, start, end) {
   const cal = CalendarApp.getCalendarById(calendarId);
   if (!cal) return [];
   return cal.getEvents(start, end).map(function (event) {
+    const description = event.getDescription() || '';
+    const bookingMatch = description.match(/^Booking ID:\s*(.+)$/mi);
     return {
       id: event.getId(),
       title: event.getTitle(),
       start: event.getStartTime().getTime(),
       end: event.getEndTime().getTime(),
       calendarId: calendarId,
+      bookingId: bookingMatch && bookingMatch[1] ? bookingMatch[1].trim() : '',
+      meetingUrl: (function () { try { return event.getHangoutLink() || ''; } catch (err) { return ''; } })(),
     };
   });
 }
@@ -726,6 +1395,19 @@ function findBookingEvent_(cal, eventId, bookingId, slot) {
   return null;
 }
 
+function findBookingEvents_(cal, bookingId, slot) {
+  if (!bookingId) return [];
+  const center = slot ? new Date(Number(slot)) : new Date();
+  const start = new Date(center.getTime() - 14 * 24 * 60 * 60 * 1000);
+  const end = new Date(center.getTime() + 180 * 24 * 60 * 60 * 1000);
+  const needle = 'Booking ID: ' + bookingId;
+  let events = [];
+  try { events = cal.getEvents(start, end, { search: needle }); } catch (err) { events = cal.getEvents(start, end); }
+  return events.filter(function (event) {
+    return String(event.getDescription() || '').indexOf(needle) !== -1;
+  });
+}
+
 function ensureBookingMeetingLink_(config, bookingId, slot) {
   if (!bookingId || !slot) return { eventId: '', meetingUrl: '' };
   const center = new Date(Number(slot));
@@ -781,6 +1463,11 @@ function buildBusyBlocks_(events, timeZone, includeTitles) {
         end: Utilities.formatDate(end, timeZone, 'HH:mm'),
         note: includeTitles ? (event.title || 'Busy') : 'Busy',
         sourceEventId: event.id || '',
+        eventId: event.id || '',
+        calendarId: event.calendarId || '',
+        bookingId: event.bookingId || '',
+        meetingUrl: event.meetingUrl || '',
+        sourceType: event.bookingId ? 'platform-calendar' : 'external-calendar',
       };
     });
 }
@@ -972,6 +1659,7 @@ function handleRequest_(e) {
       phone = fsString_(bookingAccess.booking, 'phone') || phone;
       notes = fsString_(bookingAccess.booking, 'notes') || notes;
       timeZone = fsString_(bookingAccess.booking, 'timezone') || timeZone;
+      ensureBookingAccountingSnapshot_(config, bookingId, bookingAccess.booking);
       const start = new Date(slot);
       const end = new Date(slot + durationMinutes * 60 * 1000);
       const cal = CalendarApp.getCalendarById(config.primaryCalendarId);
@@ -1031,6 +1719,16 @@ function handleRequest_(e) {
           if (!existingMeetingUrl) {
             recoveredMeeting = ensureBookingMeetingLink_(config, bookingId, slot);
           }
+          firestoreIamPatch_(config, 'bookings', bookingId, {
+            googleCalendarEventId: recoveredMeeting.eventId || existingEvent.getId(),
+            meetingUrl: recoveredMeeting.meetingUrl || '',
+            calendarSynced: true,
+            calendarSyncState: 'synced',
+            calendarLastSyncedAt: Date.now(),
+            calendarLastCheckedAt: Date.now(),
+            calendarSyncLastError: ''
+          });
+          const recoveredNotifications = processPendingNotificationJobs_(config, bookingId);
           return jsonOut({
             success: true,
             message: recoveredMeeting.meetingUrl
@@ -1039,8 +1737,9 @@ function handleRequest_(e) {
             eventId: recoveredMeeting.eventId || existingEvent.getId(),
             meetingUrl: recoveredMeeting.meetingUrl || '',
             calendarInviteSent: false,
-            notificationSent: false,
-            studentConfirmationSent: false,
+            notificationSent: recoveredNotifications.teacherSent === true,
+            studentConfirmationSent: recoveredNotifications.studentSent === true,
+            notificationError: recoveredNotifications.errors.join('; '),
           });
         }
         const hasConflict = bookingAccess.role === 'teacher'
@@ -1067,44 +1766,16 @@ function handleRequest_(e) {
         (((event.conferenceData || {}).entryPoints || []).filter(function (entry) {
           return entry.entryPointType === 'video';
         })[0] || {}).uri || '';
-      var notificationSent = false;
-      var studentConfirmationSent = false;
-      var notificationError = '';
-      var studentConfirmationError = '';
-      var slotLabel = Utilities.formatDate(start, timeZone, 'yyyy-MM-dd HH:mm');
-      try {
-        notificationSent = sendBookingNotificationEmail_(teacherEmail, {
-          name: name,
-          email: email,
-          phone: phone,
-          notes: notes,
-          bookingId: bookingId,
-          timeZone: timeZone,
-          slotLabel: slotLabel,
-          meetingUrl: meetingUrl
-        });
-        if (!notificationSent) {
-          notificationError = teacherEmail ? 'Teacher notification email was not accepted.' : 'Teacher email is missing.';
-        }
-      } catch (mailErr) {
-        notificationError = mailErr && mailErr.message ? mailErr.message : String(mailErr);
-      }
-      if (isValidEmail_(email)) {
-        try {
-          studentConfirmationSent = sendStudentConfirmationEmail_(email, {
-            name: name,
-            bookingId: bookingId,
-            timeZone: timeZone,
-            slotLabel: slotLabel,
-            meetingUrl: meetingUrl
-          });
-          if (!studentConfirmationSent) {
-            studentConfirmationError = email ? 'Student confirmation email was not accepted.' : 'Student email is missing.';
-          }
-        } catch (mailErr) {
-          studentConfirmationError = mailErr && mailErr.message ? mailErr.message : String(mailErr);
-        }
-      }
+      firestoreIamPatch_(config, 'bookings', bookingId, {
+        googleCalendarEventId: event.iCalUID || event.id,
+        meetingUrl: meetingUrl,
+        calendarSynced: true,
+        calendarSyncState: 'synced',
+        calendarLastSyncedAt: Date.now(),
+        calendarLastCheckedAt: Date.now(),
+        calendarSyncLastError: ''
+      });
+      const notificationResult = processPendingNotificationJobs_(config, bookingId);
       return jsonOut({
         success: true,
         message: 'Booking added to Google Calendar.',
@@ -1112,10 +1783,10 @@ function handleRequest_(e) {
         meetingUrl: meetingUrl,
         calendarInviteSent: calendarInviteSent,
         calendarInviteError: calendarInviteError,
-        notificationSent: notificationSent,
-        studentConfirmationSent: studentConfirmationSent,
-        notificationError: notificationError,
-        studentConfirmationError: studentConfirmationError,
+        notificationSent: notificationResult.teacherSent === true,
+        studentConfirmationSent: notificationResult.studentSent === true,
+        notificationError: notificationResult.errors.join('; '),
+        studentConfirmationError: notificationResult.errors.join('; '),
       });
     }
 
@@ -1161,32 +1832,14 @@ function handleRequest_(e) {
           ignoredError = deleteErr && deleteErr.message ? deleteErr.message : String(deleteErr);
         }
       }
-      var cancellationNotificationSent = false;
-      var cancellationNotificationError = '';
-      try {
-        cancellationNotificationSent = sendBookingCancellationEmail_(teacherEmail, {
-          name: name,
-          email: email,
-          phone: phone,
-          notes: notes,
-          bookingId: bookingId,
-          timeZone: timeZone,
-          slotLabel: slot ? Utilities.formatDate(new Date(slot), timeZone, 'yyyy-MM-dd HH:mm') : '',
-          canceledBy: canceledBy
-        });
-        if (!cancellationNotificationSent) {
-          cancellationNotificationError = teacherEmail ? 'Cancellation notification email was not accepted.' : 'Teacher email is missing.';
-        }
-      } catch (mailErr) {
-        cancellationNotificationError = mailErr && mailErr.message ? mailErr.message : String(mailErr);
-      }
+      const cancellationNotifications = processPendingNotificationJobs_(config, bookingId);
       return jsonOut({
         success: true,
         message: alreadyDeleted ? 'Calendar event was already removed.' : 'Calendar event deleted.',
         alreadyDeleted: alreadyDeleted,
         ignoredError: ignoredError,
-        cancellationNotificationSent: cancellationNotificationSent,
-        cancellationNotificationError: cancellationNotificationError
+        cancellationNotificationSent: cancellationNotifications.teacherSent === true || cancellationNotifications.studentSent === true,
+        cancellationNotificationError: cancellationNotifications.errors.join('; ')
       });
     }
 
@@ -1247,25 +1900,12 @@ function handleRequest_(e) {
       try {
         meetingUrl = event.getHangoutLink() || '';
       } catch (hangoutErr) {}
-      let studentNotificationSent = false;
-      try {
-        studentNotificationSent = sendStudentScheduleUpdateEmail_(
-          fsString_(bookingAccess.booking, 'email'),
-          {
-            name: fsString_(bookingAccess.booking, 'name'),
-            slotLabel: Utilities.formatDate(newStart, config.defaultTimeZone, 'yyyy-MM-dd HH:mm'),
-            durationMinutes: Math.round(durationMs / 60000),
-            timeZone: config.defaultTimeZone,
-            meetingUrl: meetingUrl,
-          }
-        );
-      } catch (notificationErr) {}
       return jsonOut({
         success: true,
         message: 'Google Calendar event rescheduled.',
         eventId: event.getId(),
         meetingUrl: meetingUrl,
-        studentNotificationSent: studentNotificationSent,
+        studentNotificationSent: false,
       });
     }
 

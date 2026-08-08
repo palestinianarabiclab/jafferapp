@@ -230,6 +230,7 @@ async function syncPendingBookingsViaAppsScript({ limit = 10 } = {}) {
         for (const doc of pendingDocs) {
             const booking = doc.data();
             if (!booking || !booking.slot) continue;
+            if (["externally-modified", "conflict"].includes(String(booking.calendarSyncState || ""))) continue;
             if (booking.status === "canceled") {
                 if (!booking.calendarDeletePending) continue;
                 const deleteResult = await deleteBookingViaAppsScript({
@@ -241,6 +242,11 @@ async function syncPendingBookingsViaAppsScript({ limit = 10 } = {}) {
                 if (deleteResult?.success) {
                     await window.db.collection("bookings").doc(doc.id).set({
                         calendarDeletePending: false,
+                        calendarSyncState: "externally-deleted",
+                        calendarLastSyncedAt: Date.now(),
+                        calendarLastCheckedAt: Date.now(),
+                        calendarNextRetryAt: 0,
+                        calendarSyncLastError: "",
                         updatedAt: Date.now(),
                         history: window.firebase.firestore.FieldValue.arrayUnion({
                             at: Date.now(),
@@ -251,24 +257,48 @@ async function syncPendingBookingsViaAppsScript({ limit = 10 } = {}) {
                     syncedCount += 1;
                 } else {
                     failedCount += 1;
+                    const attempts = Number(booking.calendarSyncAttempts || 0) + 1;
+                    const failedAt = Date.now();
+                    await window.db.collection("bookings").doc(doc.id).set({
+                        calendarSyncState: "pending-delete",
+                        calendarSyncAttempts: attempts,
+                        calendarSyncLastAttemptAt: failedAt,
+                        calendarNextRetryAt: failedAt + Math.min(1440, Math.pow(2, Math.min(attempts, 8))) * 60000,
+                        calendarSyncLastError: String(deleteResult?.message || "Calendar deletion failed.").slice(0, 1000),
+                        updatedAt: failedAt,
+                    }, { merge: true }).catch(() => {});
                     failedDetails.push(`${booking.name || booking.email || "Canceled booking"}: ${deleteResult?.message || "Calendar deletion failed"}`);
                 }
                 continue;
             }
-            const result = await createBookingViaAppsScript({
-                bookingId: doc.id,
-                slot: booking.slot,
-                durationMinutes: booking.slotMinutes || window.bookingSettings?.slotMinutes || 50,
-                timeZone: booking.timezone || window.bookingSettings?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "Africa/Cairo",
-                name: booking.name || "",
-                email: booking.email || "",
-                phone: booking.phone || "",
-                notes: booking.notes || "",
-                teacherEmail: bookingData.contactEmail || "",
-            });
+            const isPendingUpdate = booking.calendarSyncState === "pending-update";
+            const result = isPendingUpdate
+                ? await rescheduleBookingViaAppsScript({
+                    bookingId: doc.id,
+                    eventId: booking.googleCalendarEventId || "",
+                    oldSlot: Number(booking.rescheduledFrom || booking.slot || 0),
+                    newSlot: Number(booking.slot || 0),
+                    durationMinutes: booking.durationMinutes || booking.slotMinutes || window.bookingSettings?.slotMinutes || 50,
+                })
+                : await createBookingViaAppsScript({
+                    bookingId: doc.id,
+                    slot: booking.slot,
+                    durationMinutes: booking.durationMinutes || booking.slotMinutes || window.bookingSettings?.slotMinutes || 50,
+                    timeZone: booking.timezone || window.bookingSettings?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "Africa/Cairo",
+                    name: booking.name || "",
+                    email: booking.email || "",
+                    phone: booking.phone || "",
+                    notes: booking.notes || "",
+                    teacherEmail: bookingData.contactEmail || "",
+                });
             if (result?.success) {
                 await window.db.collection("bookings").doc(doc.id).set({
                     calendarSynced: true,
+                    calendarSyncState: "synced",
+                    calendarLastSyncedAt: Date.now(),
+                    calendarLastCheckedAt: Date.now(),
+                    calendarNextRetryAt: 0,
+                    calendarSyncLastError: "",
                     googleCalendarEventId: result.eventId || null,
                     meetingUrl: result.meetingUrl || "",
                     history: window.firebase.firestore.FieldValue.arrayUnion({
@@ -284,6 +314,16 @@ async function syncPendingBookingsViaAppsScript({ limit = 10 } = {}) {
                 syncedCount += 1;
             } else {
                 failedCount += 1;
+                const attempts = Number(booking.calendarSyncAttempts || 0) + 1;
+                const failedAt = Date.now();
+                await window.db.collection("bookings").doc(doc.id).set({
+                    calendarSyncAttempts: attempts,
+                    calendarSyncLastAttemptAt: failedAt,
+                    calendarNextRetryAt: failedAt + Math.min(1440, Math.pow(2, Math.min(attempts, 8))) * 60000,
+                    calendarSyncLastError: String(result?.message || "Calendar sync failed.").slice(0, 1000),
+                    calendarSyncState: booking.status === "canceled" ? "pending-delete" : "failed",
+                    updatedAt: failedAt,
+                }, { merge: true }).catch(() => {});
                 const slotLabel = booking.slot
                     ? new Date(Number(booking.slot)).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })
                     : doc.id;

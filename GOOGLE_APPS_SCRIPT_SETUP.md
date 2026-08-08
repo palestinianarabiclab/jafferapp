@@ -92,3 +92,29 @@ If you also have busy events on another Google Calendar:
 - It does not use the browser Google token for booking sync.
 - If Apps Script cannot access the Preply calendar, the Google account that owns the script likely does not have permission to that calendar.
 - Reminder email sending uses your Apps Script / Gmail daily quota.
+# Phase 2 automatic Calendar synchronization (one-time setup)
+
+After copying `apps-script/booking-sync.gs`, also copy the contents of
+`apps-script/appsscript.json` into the Apps Script manifest (`Project Settings` →
+show `appsscript.json`). Redeploy the Web App, run `installCalendarSyncTrigger`
+once from the Apps Script editor, and accept the requested Calendar, Firestore,
+and trigger permissions. The Google account that owns/runs the script must have
+Firestore access to the `jafferapp` Firebase project (Editor, or a narrower role
+that can read/write Firestore documents).
+
+The installed trigger runs `runCalendarSyncWorker` every five minutes. It is
+the durable retry/reconciliation worker; normal operation does not require an
+open browser tab or the dashboard's manual refresh buttons.
+The same five-minute trigger now also processes durable `notificationJobs` for booking,
+reschedule, and cancellation emails. No second trigger is required. After deploying the
+Phase 3 script, run `installCalendarSyncTrigger` once so Calendar and email retries keep
+working even when no browser tab is open.
+
+## Phase 4 private accounting migration
+
+Deploy the website code first while the existing rules are still active, sign in once as
+the teacher, and open the Students dashboard. This copies legacy financial fields into
+`studentAccounting` / `bookingAccounting` and removes their public copies without
+changing credits or history. After that completes, deploy `firestore.rules`, then deploy
+the latest Apps Script version. The Calendar worker snapshots future booking prices from
+`teacherAccountingSettings/primary` and `studentAccounting/{uid}`.

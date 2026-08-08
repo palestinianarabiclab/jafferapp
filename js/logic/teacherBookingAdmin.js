@@ -1,3 +1,25 @@
+import { getLessonEndAt, getBookingIntervalClaimIds, getBookingSlotClaimId } from "./bookingSafety.js";
+import { CALENDAR_SYNC_STATES } from "./calendarSyncSafety.js";
+import { createNotificationJob } from "./notificationSafety.js";
+
+function setNotificationJob(db, writer, job) {
+    const { id, ...data } = job;
+    writer.set(db.collection("notificationJobs").doc(id), data);
+}
+
+function notificationSummaryFields(teacherJob, studentJob, operationVersion) {
+    const result = { notificationOperationVersion: Number(operationVersion || 0) };
+    [["teacher", teacherJob], ["student", studentJob]].forEach(([prefix, job]) => {
+        result[`${prefix}NotificationStatus`] = job.state;
+        result[`${prefix}NotificationAttempts`] = Number(job.attempts || 0);
+        result[`${prefix}NotificationLastAttemptAt`] = Number(job.lastAttemptAt || 0);
+        result[`${prefix}NotificationNextRetryAt`] = Number(job.nextRetryAt || 0);
+        result[`${prefix}NotificationLastError`] = String(job.lastError || "");
+        result[`${prefix}NotificationSentAt`] = Number(job.sentAt || 0);
+    });
+    return result;
+}
+
 export async function renderTeacherBookings({
     db,
     teacherBookingList,
@@ -9,7 +31,7 @@ export async function renderTeacherBookings({
     teacherBookingList.innerHTML = "<div class=\"small-note\">Loading bookings...</div>";
     bookingCache.clear();
     try {
-        const managementStart = Date.now() - 3600000;
+        const managementStart = Date.now() - 4 * 60 * 60 * 1000;
         const calendarHistoryStart = Date.now() - 60 * 24 * 60 * 60 * 1000;
         let upcomingSnap;
         let historySnap;
@@ -58,7 +80,7 @@ export async function renderTeacherBookings({
         items.forEach((booking) => {
             bookingCache.set(booking.id, booking);
         });
-        const managementItems = items.filter((booking) => Number(booking.slot || 0) >= managementStart);
+        const managementItems = items.filter((booking) => getLessonEndAt(booking) > Date.now());
         if (!managementItems.length) {
             teacherBookingList.innerHTML = "<div class=\"small-note\">No upcoming bookings.</div>";
             return bookingCache;
@@ -98,6 +120,8 @@ export async function renderTeacherBookings({
                     : (status !== "canceled" && status !== "completed")
                         ? `<div style="font-size: 0.72rem; color: #166534; background: #f0fdf4; border: 1px solid #dcfce7; padding: 4px 8px; border-radius: 4px; margin-top: 6px; line-height: 1.3;">🕒 Reschedule Deadline: <strong>${escapeHtml(formattedDeadline)}</strong></div>`
                         : "";
+                const notificationLabel = (value) => ({ sent: "Sent", pending: "Pending", sending: "Sending", failed: "Failed — retry scheduled", skipped: "Skipped" }[String(value || "")] || "Legacy / not tracked");
+                const notificationStatus = `<div class="booking-item__meta">Student email: ${escapeHtml(notificationLabel(b.studentNotificationStatus))} · Teacher email: ${escapeHtml(notificationLabel(b.teacherNotificationStatus))}</div>`;
                 return `
                     <div class="booking-item" data-booking-id="${b.id}">
                         <div class="booking-item__main">
@@ -107,6 +131,7 @@ export async function renderTeacherBookings({
                             ${rescheduledFrom}
                             <div class="${statusClass}">${escapeHtml(statusLabel)}</div>
                             ${lessonTypeLabel}
+                            ${notificationStatus}
                             ${lateLabel}
                         </div>
                         <div class="booking-item__actions" style="display: flex; flex-wrap: wrap; gap: 6px;">
@@ -160,10 +185,11 @@ export async function openReschedulePanel({
     `;
 }
 
-export async function cancelBooking({ db, firebase, bookingId }) {
+export async function cancelBooking({ db, firebase, bookingId, teacherEmail = "" }) {
     const bookingSnap = await db.collection("bookings").doc(bookingId).get();
     if (!bookingSnap.exists) throw new Error("Booking was not found.");
     const booking = bookingSnap.data() || {};
+    if (String(booking.status || "").toLowerCase() === "canceled") return { alreadyCanceled: true };
     const canceledAt = Date.now();
     const batch = db.batch();
     batch.set(
@@ -172,9 +198,13 @@ export async function cancelBooking({ db, firebase, bookingId }) {
             status: "canceled",
             calendarSynced: false,
             calendarDeletePending: true,
+            calendarSyncState: CALENDAR_SYNC_STATES.PENDING_DELETE,
+            calendarNextRetryAt: canceledAt,
+            calendarSyncLastError: "",
             updatedAt: canceledAt,
             canceledAt,
             canceledBy: "teacher",
+            reservationState: booking.isFreeTrial === true ? "not-required" : "released",
             history: firebase.firestore.FieldValue.arrayUnion({
                 at: canceledAt,
                 action: "canceled",
@@ -183,6 +213,26 @@ export async function cancelBooking({ db, firebase, bookingId }) {
         },
         { merge: true }
     );
+    const teacherJob = createNotificationJob({
+        bookingId,
+        notificationType: "cancellation",
+        operationVersion: canceledAt,
+        recipientType: "teacher",
+        recipientEmail: "",
+        actor: "teacher",
+    });
+    teacherJob.lastError = "Teacher cancellation does not require a duplicate teacher email.";
+    const studentJob = createNotificationJob({
+        bookingId,
+        notificationType: "cancellation",
+        operationVersion: canceledAt,
+        recipientType: "student",
+        recipientEmail: booking.email,
+        actor: "teacher",
+    });
+    setNotificationJob(db, batch, teacherJob);
+    setNotificationJob(db, batch, studentJob);
+    batch.set(db.collection("bookings").doc(bookingId), notificationSummaryFields(teacherJob, studentJob, canceledAt), { merge: true });
     batch.set(
         db.collection("publicBookings").doc(bookingId),
         {
@@ -199,6 +249,20 @@ export async function cancelBooking({ db, firebase, bookingId }) {
             updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
         }, { merge: true });
         batch.delete(db.collection("trialClaims").doc(booking.studentUid));
+    }
+    const slotClaimIds = Array.isArray(booking.slotClaimIds) && booking.slotClaimIds.length
+        ? booking.slotClaimIds
+        : [getBookingSlotClaimId(booking.slot)];
+    slotClaimIds.forEach((claimId) => batch.delete(db.collection("bookingSlotClaims").doc(claimId)));
+    if (booking.reservationClaimId) {
+        batch.delete(db.collection("lessonCreditClaims").doc(booking.reservationClaimId));
+    } else if (booking.studentUid && booking.isFreeTrial !== true) {
+        const claimSnap = await db.collection("lessonCreditClaims")
+            .where("studentUid", "==", booking.studentUid)
+            .where("bookingId", "==", bookingId)
+            .limit(5)
+            .get();
+        claimSnap.forEach((doc) => batch.delete(doc.ref));
     }
     await batch.commit();
 }
@@ -226,7 +290,9 @@ export async function rescheduleBooking({
     calendarSynced = false,
     googleCalendarEventId = null,
     meetingUrl = "",
+    teacherEmail = "",
 }) {
+    const operationVersion = Date.now();
     const batch = db.batch();
     batch.set(
         db.collection("bookings").doc(bookingId),
@@ -234,14 +300,19 @@ export async function rescheduleBooking({
             slot: newSlot,
             status: "rescheduled",
             rescheduledFrom: booking.slot,
-            rescheduledAt: Date.now(),
+            rescheduledAt: operationVersion,
             calendarSynced,
+            calendarSyncState: calendarSynced ? CALENDAR_SYNC_STATES.SYNCED : CALENDAR_SYNC_STATES.PENDING_UPDATE,
+            calendarLastSyncedAt: calendarSynced ? Date.now() : Number(booking.calendarLastSyncedAt || 0),
+            calendarLastCheckedAt: Date.now(),
+            calendarNextRetryAt: calendarSynced ? 0 : Date.now(),
+            calendarSyncLastError: "",
             googleCalendarEventId,
             meetingUrl,
             studentNotice: "Your teacher changed the lesson time. Please review the updated schedule.",
-            studentNoticeAt: Date.now(),
+            studentNoticeAt: operationVersion,
             history: firebase.firestore.FieldValue.arrayUnion({
-                at: Date.now(),
+                at: operationVersion,
                 action: "rescheduled",
                 by: "teacher",
                 from: booking.slot,
@@ -260,6 +331,45 @@ export async function rescheduleBooking({
         },
         { merge: true }
     );
+    const teacherJob = createNotificationJob({
+        bookingId,
+        notificationType: "reschedule",
+        operationVersion,
+        recipientType: "teacher",
+        recipientEmail: teacherEmail,
+        actor: "teacher",
+    });
+    const studentJob = createNotificationJob({
+        bookingId,
+        notificationType: "reschedule",
+        operationVersion,
+        recipientType: "student",
+        recipientEmail: booking.email,
+        actor: "teacher",
+    });
+    setNotificationJob(db, batch, teacherJob);
+    setNotificationJob(db, batch, studentJob);
+    batch.set(db.collection("bookings").doc(bookingId), notificationSummaryFields(teacherJob, studentJob, operationVersion), { merge: true });
+    const oldClaimIds = Array.isArray(booking.slotClaimIds) && booking.slotClaimIds.length
+        ? booking.slotClaimIds
+        : [getBookingSlotClaimId(booking.slot)];
+    const durationMinutes = Number(booking.durationMinutes || booking.slotMinutes || 50);
+    const newClaimIds = [getBookingSlotClaimId(newSlot), ...getBookingIntervalClaimIds(newSlot, durationMinutes)];
+    oldClaimIds.filter((claimId) => !newClaimIds.includes(claimId))
+        .forEach((claimId) => batch.delete(db.collection("bookingSlotClaims").doc(claimId)));
+    newClaimIds.filter((claimId) => !oldClaimIds.includes(claimId))
+        .forEach((claimId) => batch.set(db.collection("bookingSlotClaims").doc(claimId), {
+        bookingId,
+        studentUid: booking.studentUid || "",
+        slot: Number(newSlot || 0),
+        endAt: Number(newSlot || 0) + durationMinutes * 60000,
+        claimType: claimId.startsWith("interval_") ? "interval" : "anchor",
+        createdAt: Date.now(),
+        }));
+    batch.set(db.collection("bookings").doc(bookingId), {
+        slotClaimIds: newClaimIds,
+        consumeAfter: Number(newSlot || 0) + durationMinutes * 60000,
+    }, { merge: true });
     await batch.commit();
 }
 
@@ -271,11 +381,19 @@ export async function resizeBookingDuration({
     durationMinutes,
 }) {
     const updatedAt = Date.now();
+    const slot = Number(booking.slot || 0);
+    const oldDuration = Number(booking.durationMinutes || booking.slotMinutes || 50);
+    const oldClaimIds = Array.isArray(booking.slotClaimIds) && booking.slotClaimIds.length
+        ? booking.slotClaimIds
+        : [getBookingSlotClaimId(slot), ...getBookingIntervalClaimIds(slot, oldDuration)];
+    const newClaimIds = [getBookingSlotClaimId(slot), ...getBookingIntervalClaimIds(slot, durationMinutes)];
     const batch = db.batch();
     batch.set(
         db.collection("bookings").doc(bookingId),
         {
             durationMinutes,
+            consumeAfter: slot + durationMinutes * 60000,
+            slotClaimIds: newClaimIds,
             updatedAt,
             studentNotice: `Your teacher changed the lesson duration to ${durationMinutes} minutes.`,
             studentNoticeAt: updatedAt,
@@ -297,6 +415,17 @@ export async function resizeBookingDuration({
         },
         { merge: true }
     );
+    oldClaimIds.filter((claimId) => !newClaimIds.includes(claimId))
+        .forEach((claimId) => batch.delete(db.collection("bookingSlotClaims").doc(claimId)));
+    newClaimIds.filter((claimId) => !oldClaimIds.includes(claimId))
+        .forEach((claimId) => batch.set(db.collection("bookingSlotClaims").doc(claimId), {
+            bookingId,
+            studentUid: booking.studentUid || "",
+            slot,
+            endAt: slot + durationMinutes * 60000,
+            claimType: claimId.startsWith("interval_") ? "interval" : "anchor",
+            createdAt: updatedAt,
+        }));
     await batch.commit();
 }
 

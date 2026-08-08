@@ -1,25 +1,21 @@
 {
   "timeZone": "Africa/Cairo",
-  "exceptionLogging": "STACKDRIVER",
-  "runtimeVersion": "V8",
   "dependencies": {
     "enabledAdvancedServices": [
       {
         "userSymbol": "Calendar",
-        "version": "v3",
-        "serviceId": "calendar"
+        "serviceId": "calendar",
+        "version": "v3"
       }
     ]
   },
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
   "oauthScopes": [
     "https://www.googleapis.com/auth/calendar",
-    "https://www.googleapis.com/auth/script.send_mail",
+    "https://www.googleapis.com/auth/datastore",
+    "https://www.googleapis.com/auth/script.external_request",
     "https://www.googleapis.com/auth/script.scriptapp",
-    "https://www.googleapis.com/auth/script.storage",
-    "https://www.googleapis.com/auth/script.external_request"
-  ],
-  "webapp": {
-    "executeAs": "USER_DEPLOYING",
-    "access": "ANYONE"
-  }
+    "https://www.googleapis.com/auth/script.send_mail"
+  ]
 }

@@ -2,6 +2,7 @@ import {
     isSlotBeyondMinimumLead,
     invalidateBookedSlotsCache,
 } from "./bookingAvailability.js";
+import { buildPendingCalendarState } from "./calendarSyncSafety.js";
 
 export async function submitGuestBooking({
     db,
@@ -134,7 +135,7 @@ export async function submitGuestBooking({
             studentLocale ? `Student locale: ${studentLocale}` : "",
         ].filter(Boolean).join("\n");
 
-        const bookingRef = db.collection("bookings").doc();
+        let bookingRef = db.collection("bookings").doc();
         let calendarSynced = false;
         let googleCalendarEventId = null;
         let meetingUrl = "";
@@ -165,13 +166,13 @@ export async function submitGuestBooking({
             durationMinutes: bookingSettings.slotMinutes || 50,
             status: "booked",
             calendarSynced,
+            ...buildPendingCalendarState("create"),
             googleCalendarEventId,
             meetingUrl,
             timezone: bookingSettings.timezone || getLocalTimezone(),
             createdAt: Date.now(),
             updatedAt: Date.now(),
             isFreeTrial: isFreeTrial === true,
-            lessonPrice: isFreeTrial === true ? 0 : (Number(lessonPrice) || 15),
             history: [
                 {
                     at: Date.now(),
@@ -192,12 +193,14 @@ export async function submitGuestBooking({
         };
 
         if (commitBookingWithBilling) {
-            await commitBookingWithBilling({
+            const commitResult = await commitBookingWithBilling({
                 bookingRef,
                 bookingData,
                 publicBookingData,
                 billing: studentBilling,
             });
+            if (commitResult?.bookingRef) bookingRef = commitResult.bookingRef;
+            if (commitResult?.bookingData) Object.assign(bookingData, commitResult.bookingData);
         } else {
             const batch = db.batch();
             batch.set(bookingRef, bookingData);
@@ -250,6 +253,11 @@ export async function submitGuestBooking({
             const syncBatch = db.batch();
             syncBatch.set(bookingRef, {
                 calendarSynced: true,
+                calendarSyncState: "synced",
+                calendarLastSyncedAt: Date.now(),
+                calendarLastCheckedAt: Date.now(),
+                calendarSyncLastError: "",
+                calendarNextRetryAt: 0,
                 googleCalendarEventId,
                 meetingUrl,
                 updatedAt: Date.now(),
@@ -301,7 +309,8 @@ export async function submitGuestBooking({
                 cancelBatch.set(bookingRef, {
                     status: "canceled",
                     canceledAt,
-                    canceledBy: "student",
+                    canceledBy: "system",
+                    reservationState: bookingData.isFreeTrial === true ? "not-required" : "released",
                     updatedAt: canceledAt,
                     history: window.firebase.firestore.FieldValue.arrayUnion({
                         at: canceledAt,
@@ -313,6 +322,10 @@ export async function submitGuestBooking({
                     status: "canceled",
                     updatedAt: canceledAt,
                 }, { merge: true });
+                cancelBatch.delete(db.collection("bookingSlotClaims").doc(`slot_${Math.trunc(selectedSlot)}`));
+                if (bookingData.reservationClaimId) {
+                    cancelBatch.delete(db.collection("lessonCreditClaims").doc(bookingData.reservationClaimId));
+                }
                 await cancelBatch.commit();
                 invalidateBookedSlotsCache();
                 if (bookingMsg) {
@@ -325,6 +338,15 @@ export async function submitGuestBooking({
                 "Google Calendar sync failed; booking is saved for a later retry.",
                 appsScriptMessage || "Unknown Apps Script error."
             );
+            const failedAt = Date.now();
+            await bookingRef.set({
+                calendarSyncState: "pending-create",
+                calendarSyncAttempts: 1,
+                calendarSyncLastAttemptAt: failedAt,
+                calendarNextRetryAt: failedAt + 2 * 60000,
+                calendarSyncLastError: String(appsScriptMessage || "Calendar backend unavailable.").slice(0, 1000),
+                updatedAt: failedAt,
+            }, { merge: true }).catch(() => {});
         }
 
         if (bookingMsg) {
@@ -404,9 +426,12 @@ export async function submitGuestBooking({
         const permissionDenied = ["permission-denied", "firestore/permission-denied"]
             .includes(err?.code);
         if (bookingMsg) {
+            const safeMessage = String(err?.message || "");
             bookingMsg.textContent = permissionDenied
                 ? "Firestore rejected the booking. No new booking was confirmed; please contact the teacher."
-                : "Booking failed. Please try again.";
+                : /no unreserved lesson credit|time was just taken|already being processed/i.test(safeMessage)
+                    ? safeMessage
+                    : "Booking failed. Please try again.";
         }
     } finally {
         if (bookingSubmit) bookingSubmit.classList.remove("is-loading");

@@ -401,11 +401,11 @@
                         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
                             <div>
                                 <span style="font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--ink-light); font-weight: 700; display: block;">Account Credit</span>
-                                <strong id="studentBalanceValue" style="font-size: 1.4rem; color: var(--primary);">$0.00</strong>
+                                <strong id="studentBalanceValue" style="font-size: 1.4rem; color: var(--primary);">Lesson credits</strong>
                                 <span id="studentRemainingLessonsBadge" style="display: inline-block; background: var(--primary); color: #fff; font-size: 0.82rem; font-weight: 700; padding: 2px 8px; border-radius: 12px; margin-left: 6px;">(0 lessons remaining)</span>
                             </div>
                             <div style="text-align: right;">
-                                <span id="studentLessonPriceValue" style="font-size: 0.88rem; font-weight: 600; color: var(--ink-light); display: block;">Lesson price is set by the teacher</span>
+                                <span id="studentLessonPriceValue" style="font-size: 0.88rem; font-weight: 600; color: var(--ink-light); display: block;">Accounting is private</span>
                             </div>
                         </div>
                         <div id="studentTrialNotice" style="margin-top: 8px; font-size: 0.85rem; background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; padding: 6px 10px; border-radius: 6px; font-weight: 600;" hidden>
@@ -1195,10 +1195,10 @@
                             <div class="action-row action-row--wrap">
                                 <button type="submit" class="btn btn--primary">Save Apps Script URL</button>
                                 <button id="appsScriptTestBtn" type="button" class="btn btn--outline">Test Apps Script</button>
-                                <button id="appsScriptRefreshBusyBtn" type="button" class="btn btn--ghost">Import Busy via Apps Script</button>
-                                <button id="appsScriptSyncPendingBtn" type="button" class="btn btn--ghost">Sync Pending Bookings</button>
+                                <button id="appsScriptRefreshBusyBtn" type="button" class="btn btn--ghost">Refresh Calendar Busy Times</button>
+                                <button id="appsScriptSyncPendingBtn" type="button" class="btn btn--ghost">Retry Pending Now</button>
                                 <button id="appsScriptQuotaBtn" type="button" class="btn btn--ghost">Refresh Email Quota</button>
-                                <button id="appsScriptInstallReminderBtn" type="button" class="btn btn--ghost">Reminder Setup Steps</button>
+                                <button id="appsScriptInstallReminderBtn" type="button" class="btn btn--ghost">Install Automatic Calendar Sync</button>
                                 <button id="appsScriptReminderCheckBtn" type="button" class="btn btn--ghost">Check Reminders Now</button>
                                 <button id="appsScriptBalanceCheckBtn" type="button" class="btn btn--ghost">Check Balance Deductions</button>
                                 <button id="appsScriptPreplyStatsBtn" type="button" class="btn btn--ghost">Sync Preply Statistics</button>
@@ -1226,7 +1226,7 @@
                         <div class="action-row action-row--wrap">
                             <button id="googleConnectBtn" type="button" class="btn btn--primary">Connect Browser Calendar (Optional)</button>
                             <button id="googleDisconnectBtn" type="button" class="btn btn--outline">Disconnect</button>
-                            <button id="googleImportBtn" type="button" class="btn btn--outline">Import Busy Times</button>
+                            <button id="googleImportBtn" type="button" class="btn btn--outline">Legacy Browser Calendar Refresh</button>
                             <button id="savePreplyBtn" type="button" class="btn btn--outline">Save Preply Calendar ID</button>
                             <button id="googleTestPreplyBtn" type="button" class="btn btn--ghost">Test Preply Calendar</button>
                         </div>
@@ -1743,7 +1743,7 @@
 
     <script src="./js/firebase-bootstrap.js"></script>
 
-    <script type="module" src="./js/app.js?v=20260805-feedback-summary-v40"></script>
+    <script type="module" src="./js/app.js?v=20260808-phase2-calendar-sync-v1"></script>
 </body>
 
 </html>
