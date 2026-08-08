@@ -6937,6 +6937,10 @@ async function refreshTeacherStudents() {
                                 <input data-student-price type="number" min="0" step="0.01" value="${escapeHtml(lessonPrice)}" />
                             </label>
                             <label class="field student-finance-card student-finance-card--detail">
+                                <span>Total Lesson Credits — set exact number</span>
+                                <input data-student-lesson-credits type="number" min="0" step="1" value="${escapeHtml(remainingLessons)}" />
+                            </label>
+                            <label class="field student-finance-card student-finance-card--detail">
                                 <span>Phone</span>
                                 <input value="${escapeHtml(student.phone || "")}" disabled />
                             </label>
@@ -7061,6 +7065,9 @@ async function saveStudentFinance(studentId, balance, lessonPrice, accessData = 
     const oldBalance = Number(userData.balance || 0);
     const newBalance = toMoneyValue(balance);
     const diff = newBalance - oldBalance;
+    const lessonCreditAdjustment = Number.isFinite(Number(accessData.lessonCreditAdjustment))
+        ? Math.trunc(Number(accessData.lessonCreditAdjustment))
+        : 0;
     const now = Date.now();
     const countsAsPayment = accessData.adjustmentType === "payment";
 
@@ -7097,18 +7104,24 @@ async function saveStudentFinance(studentId, balance, lessonPrice, accessData = 
         privateUpdate.totalPaid = Math.max(0, toMoneyValue(accessData.totalPaid));
     }
 
-    if (diff !== 0) {
+    if (diff !== 0 || lessonCreditAdjustment !== 0) {
         const txDesc = diff > 0
             ? `📥 Balance Credited: +$${diff.toFixed(2)}${accessData.paymentNote ? ` (${accessData.paymentNote})` : ""}`
-            : `📤 Balance Adjusted: -$${Math.abs(diff).toFixed(2)}`;
+            : diff < 0
+                ? `📤 Balance Adjusted: -$${Math.abs(diff).toFixed(2)}`
+                : `Lesson credits adjusted: ${lessonCreditAdjustment > 0 ? "+" : ""}${lessonCreditAdjustment}`;
 
         const tx = {
             id: `tx_${now}_${Math.random().toString(36).substr(2, 5)}`,
             at: now,
             amount: diff,
-            type: diff > 0 ? "credit" : "charge",
+            type: diff > 0 ? "credit" : diff < 0 ? "charge" : "lesson-credit-adjustment",
             description: txDesc,
-            newBalance: newBalance
+            newBalance,
+            lessonCreditAdjustment,
+            lessonCreditsAfter: Number.isFinite(Number(accessData.lessonCredits))
+                ? Math.max(0, Math.floor(Number(accessData.lessonCredits)))
+                : null,
         };
         privateUpdate.transactions = window.firebase.firestore.FieldValue.arrayUnion(tx);
     }
@@ -8226,6 +8239,12 @@ function wireTeacherActions() {
             const amount = toMoneyValue(form?.querySelector(isPayment ? "[data-student-add-payment]" : "[data-student-add-refund]")?.value);
             const student = state.studentCache.get(studentId) || {};
             if (!studentId || amount <= 0) { setStatus(els.teacherStudentsMsg, "Enter an amount greater than zero.", "error"); return; }
+            const effectiveLessonPrice = toMoneyValue(form?.querySelector("[data-student-price]")?.value) || getConfiguredLessonPrice();
+            const restoredLessons = isPayment || effectiveLessonPrice <= 0 ? 0 : Math.max(0, Math.floor((amount + 0.0001) / effectiveLessonPrice));
+            if (!isPayment && restoredLessons < 1) {
+                setStatus(els.teacherStudentsMsg, `Refund must be at least one lesson price (${formatMoney(effectiveLessonPrice)}) to restore a lesson.`, "error");
+                return;
+            }
             withButtonLoading(balanceActionBtn, isPayment ? "Adding..." : "Returning...", async () => {
                 await saveStudentFinance(studentId, toMoneyValue(student.balance) + amount, form?.querySelector("[data-student-price]")?.value, {
                     courseAccess: student.courseAccess === true,
@@ -8235,10 +8254,12 @@ function wireTeacherActions() {
                     courseAccessRequested: student.courseAccessRequested === true,
                     allowOverdraft: student.allowOverdraft === true,
                     reviewRequested: student.reviewRequested === true,
+                    lessonCredits: isPayment ? Number(student.lessonCredits || 0) : Number(student.lessonCredits || 0) + restoredLessons,
+                    lessonCreditAdjustment: isPayment ? 0 : restoredLessons,
                     adjustmentType: isPayment ? "payment" : "refund",
                 });
                 await refreshTeacherStudents();
-                setStatus(els.teacherStudentsMsg, `${isPayment ? "Payment added" : "Credit returned"}. New balance: ${formatMoney(toMoneyValue(student.balance) + amount)}.`, "success");
+                setStatus(els.teacherStudentsMsg, `${isPayment ? "Payment added" : `Credit returned and ${restoredLessons} lesson${restoredLessons === 1 ? "" : "s"} restored`}. New balance: ${formatMoney(toMoneyValue(student.balance) + amount)}.`, "success");
             }).catch((error) => setStatus(els.teacherStudentsMsg, error.message || "Could not update balance.", "error"));
             return;
         }
@@ -8386,6 +8407,12 @@ function wireTeacherActions() {
         const existingStudent = state.studentCache.get(studentId) || {};
         const courseAccessChecked = !!form.querySelector("[data-student-course-access]")?.checked;
         const allowOverdraftChecked = !!form.querySelector("[data-student-allow-overdraft]")?.checked;
+        const lessonCredits = Math.max(0, Math.floor(Number(form.querySelector("[data-student-lesson-credits]")?.value || 0)));
+        const reservedLessons = Math.max(0, Math.floor(Number(existingStudent.reservedLessons || 0)));
+        if (!allowOverdraftChecked && lessonCredits < reservedLessons) {
+            setStatus(els.teacherStudentsMsg, `Lesson credits cannot be lower than ${reservedLessons}, because this student has ${reservedLessons} reserved lesson${reservedLessons === 1 ? "" : "s"}.`, "error");
+            return;
+        }
         try {
             await withButtonLoading(submitter, "Saving...", async () => {
                 await saveStudentFinance(
@@ -8400,6 +8427,8 @@ function wireTeacherActions() {
                         courseAccessRequested: !courseAccessChecked && existingStudent.courseAccessRequested === true,
                         allowOverdraft: allowOverdraftChecked,
                         reviewRequested: existingStudent.reviewRequested === true,
+                        lessonCredits,
+                        lessonCreditAdjustment: lessonCredits - Math.max(0, Math.floor(Number(existingStudent.lessonCredits || 0))),
                     }
                 );
                 await refreshTeacherStudents();

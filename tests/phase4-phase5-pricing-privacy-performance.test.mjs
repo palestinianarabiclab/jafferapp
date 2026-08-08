@@ -25,3 +25,12 @@ test("15 canceled bookings do not consume", () => assert.match(app, /initialStat
 test("16 student financial fields are stripped", () => assert.deepEqual(stripStudentFinancialFields({ name: "A", balance: 10, lessonPrice: 5, totalPaid: 20, transactions: [] }), { name: "A" }));
 test("custom discount and upward adjustment are distinguishable", () => { assert.equal(priceDifference(buildPriceSnapshot({ defaultPrice: 20, customPrice: 15 })), 5); assert.equal(priceDifference(buildPriceSnapshot({ defaultPrice: 20, customPrice: 25 })), -5); });
 test("invalid custom price falls back to default", () => assert.equal(buildPriceSnapshot({ defaultPrice: 20, customPrice: -1 }).pricingSource, "default"));
+test("teacher can set the student's exact lesson-credit count", () => {
+    assert.match(app, /data-student-lesson-credits/);
+    assert.match(app, /Lesson credits cannot be lower than/);
+});
+test("a refund restores whole lessons using the student's effective lesson price", () => {
+    assert.match(app, /Math\.floor\(\(amount \+ 0\.0001\) \/ effectiveLessonPrice\)/);
+    assert.match(app, /lessonCreditAdjustment:\s*isPayment \? 0 : restoredLessons/);
+    assert.match(app, /lessonCreditsAfter/);
+});
