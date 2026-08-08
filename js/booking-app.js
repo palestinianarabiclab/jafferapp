@@ -6660,14 +6660,18 @@ function renderStudentLessonRecords(rows, className) {
         const dateLabel = slot ? new Date(slot).toLocaleString([], { dateStyle: "medium", timeStyle: "short", timeZone: getTeacherTimezone() }) : "Date unavailable";
         const status = String(booking.status || "booked").toLowerCase();
         const detail = booking.isFreeTrial ? "Free trial" : `${duration} minutes · ${status}`;
-        const ledger = booking.accounting || null;
+        const deductions = Array.isArray(booking.deductions) ? booking.deductions : [];
+        const ledger = booking.accounting || deductions[0] || null;
         let accounting = "Price: unavailable / legacy";
         if (ledger && Number.isFinite(Number(ledger.amount))) {
             const difference = Number(ledger.defaultPriceAtBooking || 0) - Number(ledger.amount || 0);
             const differenceLabel = difference > 0 ? ` · Discount: ${formatMoney(difference)}` : difference < 0 ? ` · Adjustment: +${formatMoney(Math.abs(difference))}` : "";
             accounting = `Booking ID: ${booking.id} · Lesson deducted: ${Number(ledger.lessonDeducted ?? 1)} · Price: ${formatMoney(ledger.amount)} ${ledger.currency || "USD"} · Pricing: ${ledger.pricingSource || "legacy"}${Number(ledger.defaultPriceAtBooking) > 0 ? ` · Default then: ${formatMoney(ledger.defaultPriceAtBooking)}` : ""}${Number(ledger.customPriceAtBooking) > 0 ? ` · Custom then: ${formatMoney(ledger.customPriceAtBooking)}` : ""}${differenceLabel} · Consumed: ${ledger.createdAt ? new Date(Number(ledger.createdAt)).toLocaleString() : "recorded"}`;
         }
-        return `<div class="student-lesson-record ${className}"><strong>${escapeHtml(dateLabel)}</strong><span>${escapeHtml(detail)}</span><small>${escapeHtml(accounting)}</small></div>`;
+        const deductionAudit = deductions.length
+            ? `<small style="color:${deductions.length > 1 ? "#b91c1c" : "#166534"};font-weight:700;">${deductions.length > 1 ? `⚠ Duplicate deduction records: ${deductions.length}` : "Deduction records: 1"} — ${escapeHtml(deductions.map((entry) => `${entry.transactionId || "legacy"}: ${formatMoney(Math.abs(Number(entry.amount || 0)))}`).join(" | "))}</small>`
+            : '<small>No deduction transaction found for this lesson.</small>';
+        return `<div class="student-lesson-record ${className}"><strong>${escapeHtml(dateLabel)}</strong><span>${escapeHtml(detail)}</span><small>${escapeHtml(accounting)}</small>${deductionAudit}</div>`;
     }).join("");
 }
 
@@ -6702,10 +6706,24 @@ async function openStudentLessonsModal(student) {
             Promise.all(queries),
             window.db.collection("lessonBalanceTransactions").where("studentUid", "==", student.id).limit(300).get(),
         ]);
-        const ledgerByBooking = new Map();
+        const deductionsByBooking = new Map();
+        const seenTransactionIds = new Set();
+        const addDeduction = (bookingId, entry) => {
+            if (!bookingId) return;
+            const transactionId = String(entry.transactionId || entry.id || "");
+            if (transactionId && seenTransactionIds.has(transactionId)) return;
+            if (transactionId) seenTransactionIds.add(transactionId);
+            if (!deductionsByBooking.has(bookingId)) deductionsByBooking.set(bookingId, []);
+            deductionsByBooking.get(bookingId).push(entry);
+        };
         ledgerSnap.forEach((doc) => {
             const row = doc.data() || {};
-            if (row.bookingId) ledgerByBooking.set(row.bookingId, row);
+            if (row.bookingId) addDeduction(String(row.bookingId), { transactionId: doc.id, ...row });
+        });
+        (Array.isArray(student.transactions) ? student.transactions : []).forEach((transaction) => {
+            const transactionId = String(transaction?.id || "");
+            const inferredBookingId = String(transaction?.bookingId || transactionId.match(/^consume_(.+)$/)?.[1] || transactionId.match(/^tx_(.+)_charge$/)?.[1] || "");
+            if (inferredBookingId) addDeduction(inferredBookingId, { transactionId, ...transaction, source: "student-accounting" });
         });
         const rowMap = new Map();
         const normalizedEmail = String(student.email || "").trim().toLowerCase();
@@ -6718,7 +6736,10 @@ async function openStudentLessonsModal(student) {
             if (matchesUid || matchesEmail || matchesLegacyName) rowMap.set(doc.id, { id: doc.id, ...row });
         }));
         const now = Date.now();
-        const rows = Array.from(rowMap.values()).map((row) => ({ ...row, accounting: ledgerByBooking.get(row.id) || null })).sort((a, b) => getBookingSlotMs(a.slot) - getBookingSlotMs(b.slot));
+        const rows = Array.from(rowMap.values()).map((row) => {
+            const deductions = deductionsByBooking.get(row.id) || [];
+            return { ...row, deductions, accounting: deductions[0] || null };
+        }).sort((a, b) => getBookingSlotMs(a.slot) - getBookingSlotMs(b.slot));
         const canceled = rows.filter((row) => String(row.status || "").toLowerCase() === "canceled").reverse();
         const upcoming = rows.filter((row) => {
             const status = String(row.status || "booked").toLowerCase();
@@ -6728,7 +6749,12 @@ async function openStudentLessonsModal(student) {
             const status = String(row.status || "booked").toLowerCase();
             return status !== "canceled" && (status === "completed" || isLessonHistorical(row, now));
         }).reverse();
+        const duplicateDeductions = rows.filter((row) => Array.isArray(row.deductions) && row.deductions.length > 1);
+        const deductionAuditAlert = duplicateDeductions.length
+            ? `<div class="status-line is-error" style="margin-bottom:12px;"><strong>⚠ Duplicate deduction detected</strong><br>${escapeHtml(duplicateDeductions.map((row) => `Booking ${row.id}: ${row.deductions.length} records`).join(" · "))}</div>`
+            : '<div class="small-note" style="margin-bottom:12px;">Deduction audit: no booking has more than one unique deduction transaction.</div>';
         content.innerHTML = `
+            ${deductionAuditAlert}
             <div class="student-lessons-summary"><div><strong>${upcoming.length}</strong><span>Upcoming</span></div><div><strong>${taken.length}</strong><span>Taken</span></div><div><strong>${canceled.length}</strong><span>Canceled</span></div></div>
             <div class="student-lessons-groups">
                 <section class="student-lessons-group"><h4>Upcoming Lessons</h4>${renderStudentLessonRecords(upcoming, "")}</section>
@@ -6788,12 +6814,19 @@ async function refreshTeacherStudents() {
         } else if (migrationAlreadyComplete) {
             state.privateAccountingMigrated = true;
         }
-        const [snap, accountingSnap] = await Promise.all([
+        const [snap, accountingSnap, creditClaimsSnap] = await Promise.all([
             window.db.collection("users").where("role", "==", "student").get(),
             window.db.collection("studentAccounting").limit(2000).get(),
+            window.db.collection("lessonCreditClaims").limit(5000).get(),
         ]);
         const accountingByStudent = new Map();
         accountingSnap.forEach((doc) => accountingByStudent.set(doc.id, doc.data() || {}));
+        const reservedByStudent = new Map();
+        creditClaimsSnap.forEach((doc) => {
+            const claim = doc.data() || {};
+            if (!claim.studentUid || claim.state !== "reserved") return;
+            reservedByStudent.set(claim.studentUid, Number(reservedByStudent.get(claim.studentUid) || 0) + 1);
+        });
         const students = [];
         const migrations = [];
         snap.forEach((doc) => {
@@ -6801,7 +6834,7 @@ async function refreshTeacherStudents() {
             const accounting = accountingByStudent.get(doc.id) || {};
             const hasLegacyFinance = ["balance", "lessonPrice", "totalPaid", "transactions"].some((key) => Object.prototype.hasOwnProperty.call(profile, key));
             if (hasLegacyFinance) migrations.push({ id: doc.id, profile, accounting });
-            students.push({ id: doc.id, ...profile, ...accounting });
+            students.push({ id: doc.id, ...profile, ...accounting, reservedLessons: Number(reservedByStudent.get(doc.id) || 0) });
         });
         if (!migrationAlreadyComplete) {
             if (migrations.length) await migrateLegacyStudentAccounting(migrations);
@@ -6823,6 +6856,9 @@ async function refreshTeacherStudents() {
             state.studentCache.set(student.id, student);
             const balance = formatMoney(student.balance);
             const lessonPrice = toMoneyValue(student.customLessonPrice);
+            const remainingLessons = Math.max(0, Math.floor(Number(student.lessonCredits || 0)));
+            const reservedLessons = Math.max(0, Math.floor(Number(student.reservedLessons || 0)));
+            const availableLessons = student.allowOverdraft === true ? "Unlimited" : Math.max(0, remainingLessons - reservedLessons);
             const courseAccess = student.courseAccess === true;
             const accessLabel = courseAccess ? "Course: unlocked" : "Course: locked";
             const accessRequested = (student.courseAccessRequested === true || student.paymentStatus === "pending")
@@ -6848,7 +6884,7 @@ async function refreshTeacherStudents() {
                             <strong>${escapeHtml(student.name || "Student")}</strong>
                             <span>${escapeHtml(student.email || "")}</span>
                         </span>
-                        <span class="student-admin-item__money">Balance: ${balance} | ${accessLabel}${requestLabel}</span>
+                        <span class="student-admin-item__money">Balance: ${balance} | Lessons: ${remainingLessons} · Reserved: ${reservedLessons} · Available: ${availableLessons} | ${accessLabel}${requestLabel}</span>
                     </button>
                     <form class="student-admin-editor" data-student-editor hidden>
                         ${accessRequested ? `
