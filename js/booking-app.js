@@ -6781,6 +6781,12 @@ async function refreshTeacherStudents() {
             students.push({ id: doc.id, ...profile, ...accounting });
         });
         if (migrations.length) await migrateLegacyStudentAccounting(migrations);
+        await window.db.collection("accountingMigration").doc("primary").set({
+            complete: true,
+            completedAt: Date.now(),
+            studentCount: students.length,
+            updatedAt: Date.now(),
+        }, { merge: true });
         students.sort((a, b) => String(a.name || a.email || "").localeCompare(String(b.name || b.email || "")));
         state.studentsCache = students;
         updateTeacherOverviewStats();
@@ -6918,7 +6924,10 @@ async function refreshTeacherStudents() {
         }).join("");
     } catch (error) {
         console.error("Could not load students.", error);
-        els.teacherStudentsList.innerHTML = "<div class=\"small-note\">Unable to load students.</div>";
+        const permissionHint = error?.code === "permission-denied"
+            ? " Deploy the latest firestore.rules first, then reload the teacher dashboard to run the private-accounting migration."
+            : "";
+        els.teacherStudentsList.innerHTML = `<div class="small-note">Unable to load students.${escapeHtml(permissionHint)}</div>`;
     }
 }
 

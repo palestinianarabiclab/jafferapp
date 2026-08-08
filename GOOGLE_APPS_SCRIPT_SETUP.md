@@ -112,9 +112,10 @@ working even when no browser tab is open.
 
 ## Phase 4 private accounting migration
 
-Deploy the website code first while the existing rules are still active, sign in once as
-the teacher, and open the Students dashboard. This copies legacy financial fields into
-`studentAccounting` / `bookingAccounting` and removes their public copies without
-changing credits or history. After that completes, deploy `firestore.rules`, then deploy
-the latest Apps Script version. The Calendar worker snapshots future booking prices from
+Deploy the latest `firestore.rules` first. Its migration marker keeps legacy student
+profiles readable until migration finishes. Then deploy the website, sign in once as the
+teacher, and open the Students dashboard. This copies legacy financial fields into
+`studentAccounting` / `bookingAccounting`, removes their public copies without changing
+credits or history, and writes `accountingMigration/primary.complete = true`. Finally,
+deploy the latest Apps Script version. The Calendar worker snapshots future booking prices from
 `teacherAccountingSettings/primary` and `studentAccounting/{uid}`.

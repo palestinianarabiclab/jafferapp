@@ -83,9 +83,11 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow read: if isTeacher() || (ownsDoc(uid) && !resource.data.keys().hasAny([
-        'balance', 'lessonPrice', 'totalPaid', 'transactions', 'financeUpdatedAt'
-      ]));
+      allow read: if isTeacher() || (ownsDoc(uid) && (
+        !exists(/databases/$(database)/documents/accountingMigration/primary) ||
+        get(/databases/$(database)/documents/accountingMigration/primary).data.complete != true ||
+        !resource.data.keys().hasAny(['balance', 'lessonPrice', 'totalPaid', 'transactions', 'financeUpdatedAt'])
+      ));
       allow create: if ownsDoc(uid) &&
         request.resource.data.keys().hasOnly([
           'email',
@@ -791,6 +793,12 @@ service cloud.firestore {
 
     match /teacherAccountingSettings/{docId} {
       allow read, create, update, delete: if isTeacher();
+    }
+
+    match /accountingMigration/{docId} {
+      allow read: if signedIn();
+      allow create, update: if isTeacher();
+      allow delete: if false;
     }
 
     match /errorLogs/{docId} {
