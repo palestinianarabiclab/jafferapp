@@ -589,6 +589,7 @@ service cloud.firestore {
             'rescheduledFrom',
             'rescheduledAt',
             'balanceChargedAt',
+            'lessonPrice',
             'chargedAmount',
             'chargeReason',
             'classroomNotes',
