@@ -619,8 +619,12 @@ function validLessonPrice_(value) {
 }
 
 function ensureBookingAccountingSnapshot_(config, bookingId, booking) {
+  if (fsBool_(booking, 'accountingSnapshotReady')) return null;
   const existing = firestoreIamGetOptional_(config, 'bookingAccounting', bookingId);
-  if (existing) return existing;
+  if (existing) {
+    firestoreIamPatch_(config, 'bookings', bookingId, { accountingSnapshotReady: true });
+    return existing;
+  }
   const studentUid = fsString_(booking, 'studentUid');
   const studentAccounting = studentUid ? firestoreIamGetOptional_(config, 'studentAccounting', studentUid) : null;
   const teacherPricing = firestoreIamGetOptional_(config, 'teacherAccountingSettings', 'primary');
@@ -641,6 +645,7 @@ function ensureBookingAccountingSnapshot_(config, bookingId, booking) {
     legacyPriceSource: legacyCustom > 0
   };
   firestoreIamPatch_(config, 'bookingAccounting', bookingId, snapshot);
+  firestoreIamPatch_(config, 'bookings', bookingId, { accountingSnapshotReady: true });
   return firestoreIamGetOptional_(config, 'bookingAccounting', bookingId);
 }
 

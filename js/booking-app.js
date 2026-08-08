@@ -1467,13 +1467,8 @@ async function refreshTeacherCalendarData({ force = false } = {}) {
     if (state.teacherCalendarRefreshInFlight) return state.teacherCalendarRefreshInFlight;
     state.teacherCalendarRefreshInFlight = (async () => {
         state.teacherLastCalendarRefreshAt = Date.now();
-        if (typeof window.syncPendingBookingsViaAppsScript === "function") {
-            await window.syncPendingBookingsViaAppsScript({ limit: 10 }).catch((error) => {
-                console.warn("Foreground pending Calendar sync failed; background worker will retry.", error);
-            });
-        }
         await refreshRuntimeBusyBlocks({ force, minDays: 31 });
-        await refreshTeacherBookings();
+        await refreshTeacherBookings({ reconcile: false });
         renderTeacherWeekCalendar();
     })().finally(() => { state.teacherCalendarRefreshInFlight = null; });
     return state.teacherCalendarRefreshInFlight;
@@ -1498,7 +1493,9 @@ function startTeacherCalendarAutoRefresh() {
     };
     state.teacherCalendarRefreshTimer = window.setInterval(() => refreshIfVisible(true), GOOGLE_BUSY_REFRESH_MS);
     state.teacherBookingsUnsubscribe = window.db.collection("bookings")
-        .where("slot", ">=", Date.now() - 60 * 24 * 60 * 60 * 1000)
+        .where("slot", ">=", Date.now() - 4 * 60 * 60 * 1000)
+        .orderBy("slot")
+        .limit(150)
         .onSnapshot(() => {
         if (state.teacherBookingsRefreshTimer) window.clearTimeout(state.teacherBookingsRefreshTimer);
         state.teacherBookingsRefreshTimer = window.setTimeout(() => refreshIfVisible(false), 400);
@@ -2527,7 +2524,7 @@ async function loadPublicLessonFeedbackSummary() {
         );
 }
 
-async function refreshTeacherLessonFeedback() {
+async function refreshTeacherLessonFeedback(existingSnapshot = null) {
     if (!window.db || !state.teacherUser || state.teacherRole !== "teacher") return;
     const baselineSummary = buildLessonFeedbackSummary([]);
     if (els.teacherLessonFeedbackCount) {
@@ -2537,7 +2534,7 @@ async function refreshTeacherLessonFeedback() {
     if (els.teacherLessonFeedbackComments) {
         els.teacherLessonFeedbackComments.innerHTML = `<p class="small-note">Loading private lesson comments...</p>`;
     }
-    const snap = await window.db.collection("lessonFeedback").orderBy("createdAt", "desc").limit(100).get();
+    const snap = existingSnapshot || await window.db.collection("lessonFeedback").orderBy("createdAt", "desc").limit(100).get();
     const rows = snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
     const summary = buildLessonFeedbackSummary(rows);
     await window.db.collection("lessonFeedbackSummary").doc("public").set({
@@ -2582,10 +2579,12 @@ function startTeacherLessonFeedbackListener() {
     if (!window.db || !state.teacherUser || state.teacherRole !== "teacher") return;
     state.teacherLessonFeedbackUnsubscribe = window.db
         .collection("lessonFeedback")
-        .onSnapshot(() => {
+        .orderBy("createdAt", "desc")
+        .limit(100)
+        .onSnapshot((snapshot) => {
             if (state.teacherLessonFeedbackRefreshTimer) window.clearTimeout(state.teacherLessonFeedbackRefreshTimer);
             state.teacherLessonFeedbackRefreshTimer = window.setTimeout(() => {
-                refreshTeacherLessonFeedback().catch((error) => console.warn("Could not refresh lesson feedback.", error));
+                refreshTeacherLessonFeedback(snapshot).catch((error) => console.warn("Could not refresh lesson feedback.", error));
             }, 250);
         }, (error) => console.warn("Lesson feedback listener failed.", error));
 }
@@ -5397,10 +5396,24 @@ async function refreshTeacherDashboard() {
     }
     await refreshRuntimeBusyBlocks();
     syncTeacherFormFields();
-    await refreshTeacherStudents();
-    await refreshTeacherBookings();
-    await refreshGoogleCalendarStatus();
-    await renderBookingCalendar();
+    await refreshTeacherBookings({ reconcile: false });
+    renderTeacherWeekCalendar();
+    const secondaryLoads = [
+        refreshTeacherStudents(),
+        refreshGoogleCalendarStatus(),
+        renderBookingCalendar(),
+        reconcileStudentBalances().then(async (result) => {
+            if (result?.chargedCount) {
+                await Promise.all([refreshTeacherStudents(), refreshTeacherBookings({ reconcile: false })]);
+            }
+            return result;
+        }),
+    ];
+    Promise.allSettled(secondaryLoads).then((results) => {
+        results.filter((result) => result.status === "rejected").forEach((result) => {
+            console.warn("A secondary teacher dashboard task failed.", result.reason);
+        });
+    });
     updateTeacherOverviewStats();
 }
 
@@ -5731,19 +5744,22 @@ async function syncPreplyStatistics() {
     if (!state.teacherUser || state.teacherRole !== "teacher") {
         throw new Error("Teacher login is required.");
     }
-    const result = await window.getPreplyStatisticsViaAppsScript?.({ days: 730 });
-    if (!result?.success) {
-        throw new Error(result?.message || "Could not load Preply calendar statistics.");
-    }
     const teacherRef = window.db.collection("teachers").doc(state.teacherUser.uid);
     const teacherSnap = await teacherRef.get();
     const teacherData = teacherSnap.exists ? (teacherSnap.data() || {}) : {};
     const previous = teacherData.calendarStatistics || {};
+    const firstSync = previous.initialized !== true;
+    const lastSyncedAt = Number(previous.lastSyncedAt || 0);
+    const elapsedDays = lastSyncedAt > 0 ? Math.ceil((Date.now() - lastSyncedAt) / (24 * 60 * 60 * 1000)) : 1;
+    const lookbackDays = firstSync ? 730 : Math.min(7, Math.max(2, elapsedDays + 1));
+    const result = await window.getPreplyStatisticsViaAppsScript?.({ days: lookbackDays });
+    if (!result?.success) {
+        throw new Error(result?.message || "Could not load Preply calendar statistics.");
+    }
     const currentEventIds = Array.isArray(result.eventIds) ? result.eventIds.map(String) : [];
     const currentStudentKeys = Array.isArray(result.studentKeys) ? result.studentKeys.map(String) : [];
     const existingEventIds = new Set(Array.isArray(previous.processedEventIds) ? previous.processedEventIds.map(String) : []);
     const existingStudentKeys = new Set(Array.isArray(previous.knownStudentKeys) ? previous.knownStudentKeys.map(String) : []);
-    const firstSync = previous.initialized !== true;
     const newEventIds = firstSync ? [] : currentEventIds.filter((eventId) => !existingEventIds.has(eventId));
     const newStudentKeys = firstSync ? [] : currentStudentKeys.filter((studentKey) => !existingStudentKeys.has(studentKey));
     const currentLessons = parseProfileCounter(state.profileSettings?.hoursTaught, 1200);
@@ -5760,6 +5776,7 @@ async function syncPreplyStatistics() {
         studentsAdded: Number(previous.studentsAdded || 0) + newStudentKeys.length,
         lastCalendarLessonCount: Number(result.completedLessons || 0),
         lastCalendarStudentCount: Number(result.uniqueStudents || 0),
+        lastLookbackDays: lookbackDays,
         lastSyncedAt: now,
     };
     await teacherRef.set({
@@ -5878,7 +5895,7 @@ function startPreplyStatisticsAutoSync() {
             .catch((error) => {
             console.warn("Automatic completed-lesson statistics sync failed.", error);
         });
-    }, 60 * 60 * 1000);
+    }, 24 * 60 * 60 * 1000);
 }
 
 function updateSystemSyncStatusIndicator() {
@@ -5950,14 +5967,7 @@ if (typeof window !== "undefined") {
     });
 }
 
-async function refreshTeacherBookings() {
-    const balanceResult = await reconcileStudentBalances();
-    if (balanceResult.chargedCount && els.teacherStudentsMsg) {
-        setStatus(els.teacherStudentsMsg, `Deducted ${balanceResult.chargedCount} due lesson charge${balanceResult.chargedCount === 1 ? "" : "s"}.`, "success");
-        await refreshTeacherStudents();
-    } else if (balanceResult.missingPriceCount && els.teacherStudentsMsg) {
-        setStatus(els.teacherStudentsMsg, "Some due lessons were not deducted because lesson price is not set.", "error");
-    }
+async function refreshTeacherBookings({ reconcile = false } = {}) {
     state.bookingCache = await renderTeacherBookings({
         db: window.db,
         teacherBookingList: els.teacherBookingList,
@@ -5965,11 +5975,18 @@ async function refreshTeacherBookings() {
         escapeHtml,
         formatSlotTime,
     });
-    await syncPlatformStatistics().catch((error) => {
-        console.warn("Automatic platform statistics sync failed.", error);
-    });
     renderTeacherWeekCalendar();
     updateTeacherOverviewStats();
+    if (reconcile) {
+        reconcileStudentBalances().then(async (balanceResult) => {
+            if (balanceResult.chargedCount && els.teacherStudentsMsg) {
+                setStatus(els.teacherStudentsMsg, `Deducted ${balanceResult.chargedCount} due lesson charge${balanceResult.chargedCount === 1 ? "" : "s"}.`, "success");
+                await refreshTeacherStudents();
+            } else if (balanceResult.missingPriceCount && els.teacherStudentsMsg) {
+                setStatus(els.teacherStudentsMsg, "Some due lessons were not deducted because lesson price is not set.", "error");
+            }
+        }).catch((error) => console.warn("Background lesson consumption check failed.", error));
+    }
 }
 
 function renderTeacherWeekCalendar() {
@@ -6273,16 +6290,18 @@ function startBalanceReconcileAutoRefresh() {
     state.balanceReconcileTimer = window.setInterval(() => {
         if (!state.teacherUser || state.teacherRole !== "teacher") return;
         if (document.hidden) return;
-        reconcileStudentBalances()
+        if (state.balanceReconcileInFlight) return;
+        state.balanceReconcileInFlight = reconcileStudentBalances()
             .then(async (result) => {
                 if (result?.chargedCount) {
                     setStatus(els.teacherStudentsMsg, `Deducted ${result.chargedCount} due lesson charge${result.chargedCount === 1 ? "" : "s"}.`, "success");
                     await refreshTeacherStudents();
-                    await refreshTeacherBookings();
+                    await refreshTeacherBookings({ reconcile: false });
                 }
             })
-            .catch(console.error);
-    }, 10 * 60 * 1000);
+            .catch(console.error)
+            .finally(() => { state.balanceReconcileInFlight = null; });
+    }, 30 * 60 * 1000);
 }
 
 function stopBalanceReconcileAutoRefresh() {
@@ -6757,12 +6776,16 @@ async function refreshTeacherStudents() {
                 updatedAt: Date.now(),
             }, { merge: true });
         }
-        if (!state.privateAccountingMigrated) {
+        const migrationMarkerSnap = await window.db.collection("accountingMigration").doc("primary").get();
+        const migrationAlreadyComplete = migrationMarkerSnap.exists && migrationMarkerSnap.data()?.complete === true;
+        if (!state.privateAccountingMigrated && !migrationAlreadyComplete) {
             await migrateLegacyBookingAccounting();
             await window.db.collection("teacherProfile").doc("primary").set({
                 rateText: window.firebase.firestore.FieldValue.delete(),
                 updatedAt: Date.now(),
             }, { merge: true });
+            state.privateAccountingMigrated = true;
+        } else if (migrationAlreadyComplete) {
             state.privateAccountingMigrated = true;
         }
         const [snap, accountingSnap] = await Promise.all([
@@ -6780,13 +6803,15 @@ async function refreshTeacherStudents() {
             if (hasLegacyFinance) migrations.push({ id: doc.id, profile, accounting });
             students.push({ id: doc.id, ...profile, ...accounting });
         });
-        if (migrations.length) await migrateLegacyStudentAccounting(migrations);
-        await window.db.collection("accountingMigration").doc("primary").set({
-            complete: true,
-            completedAt: Date.now(),
-            studentCount: students.length,
-            updatedAt: Date.now(),
-        }, { merge: true });
+        if (!migrationAlreadyComplete) {
+            if (migrations.length) await migrateLegacyStudentAccounting(migrations);
+            await window.db.collection("accountingMigration").doc("primary").set({
+                complete: true,
+                completedAt: Date.now(),
+                studentCount: students.length,
+                updatedAt: Date.now(),
+            }, { merge: true });
+        }
         students.sort((a, b) => String(a.name || a.email || "").localeCompare(String(b.name || b.email || "")));
         state.studentsCache = students;
         updateTeacherOverviewStats();
@@ -8724,11 +8749,14 @@ async function handleAuthState(user) {
             els.teacherPreplyCalendarId.value = teacherData.preplyCalendarId || teacherData.googleCalendar?.preplyCalendarId || "";
         }
         if (teacherData.calendarStatistics?.initialized === true) {
-            syncPreplyStatistics()
-                .then(() => syncPlatformStatistics())
-                .catch((error) => {
-                console.warn("Initial completed-lesson statistics refresh failed.", error);
-            });
+            const lastStatisticsSync = Number(teacherData.calendarStatistics?.lastSyncedAt || 0);
+            if (Date.now() - lastStatisticsSync >= 24 * 60 * 60 * 1000) {
+                syncPreplyStatistics()
+                    .then(() => syncPlatformStatistics())
+                    .catch((error) => {
+                    console.warn("Initial completed-lesson statistics refresh failed.", error);
+                });
+            }
             startPreplyStatisticsAutoSync();
         }
     }).catch((error) => console.warn("Could not load teacher integration settings.", error));
