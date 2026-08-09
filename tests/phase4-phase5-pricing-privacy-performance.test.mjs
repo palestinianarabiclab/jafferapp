@@ -67,3 +67,10 @@ test("student lesson credits render as separate total reserved and available met
     assert.match(app, /<small>Reserved<\/small>/);
     assert.match(app, /<small>Available<\/small>/);
 });
+test("canceled student bookings allow safe notification follow-up and refresh live", () => {
+    assert.match(rules, /resource\.data\.status == "canceled"/);
+    assert.match(rules, /request\.resource\.data\.status == "canceled"/);
+    assert.match(rules, /'calendarDeletePending'/);
+    assert.match(rules, /'teacherNotificationStatus'/);
+    assert.match(app, /Promise\.all\(\[loadStudentBookings\(\), renderBookingCalendar\(\)\]\)/);
+});

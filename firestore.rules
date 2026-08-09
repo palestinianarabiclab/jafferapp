@@ -655,6 +655,38 @@ service cloud.firestore {
       ) || (
         signedIn() &&
           (resource.data.studentUid == request.auth.uid || resource.data.email == request.auth.token.email) &&
+          request.resource.data.studentUid == resource.data.studentUid &&
+          resource.data.status == "canceled" &&
+          request.resource.data.status == "canceled" &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'updatedAt',
+            'calendarSynced',
+            'calendarDeletePending',
+            'calendarSyncState',
+            'calendarLastSyncedAt',
+            'calendarLastCheckedAt',
+            'calendarSyncAttempts',
+            'calendarSyncLastAttemptAt',
+            'calendarNextRetryAt',
+            'calendarSyncLastError',
+            'teacherNotificationStatus',
+            'studentNotificationStatus',
+            'notificationOperationVersion',
+            'teacherNotificationAttempts',
+            'teacherNotificationLastAttemptAt',
+            'teacherNotificationNextRetryAt',
+            'teacherNotificationLastError',
+            'teacherNotificationSentAt',
+            'studentNotificationAttempts',
+            'studentNotificationLastAttemptAt',
+            'studentNotificationNextRetryAt',
+            'studentNotificationLastError',
+            'studentNotificationSentAt'
+          ]) &&
+          hasValidMeetingLink(request.resource.data)
+      ) || (
+        signedIn() &&
+          (resource.data.studentUid == request.auth.uid || resource.data.email == request.auth.token.email) &&
           (resource.data.studentUid == null || request.resource.data.studentUid == resource.data.studentUid) &&
           resource.data.status in ["booked", "rescheduled"] &&
           request.resource.data.diff(resource.data).affectedKeys().hasOnly([

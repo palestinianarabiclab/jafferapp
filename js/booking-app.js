@@ -2634,8 +2634,12 @@ function startStudentBookingsListener() {
             state.pendingLateCancellationCount = pendingLateCancellations;
             updateStudentAuthUi();
             if (state.studentBookingsRefreshTimer) window.clearTimeout(state.studentBookingsRefreshTimer);
-            state.studentBookingsRefreshTimer = window.setTimeout(() => {
-                renderBookingCalendar().catch((error) => console.warn("Could not refresh student availability.", error));
+            state.studentBookingsRefreshTimer = window.setTimeout(async () => {
+                try {
+                    await Promise.all([loadStudentBookings(), renderBookingCalendar()]);
+                } catch (error) {
+                    console.warn("Could not refresh student bookings after a live change.", error);
+                }
             }, 250);
         }, (error) => console.warn("Could not watch student bookings.", error));
 }
