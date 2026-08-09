@@ -757,7 +757,7 @@ service cloud.firestore {
 
     match /lessonCreditClaims/{claimId} {
       allow read: if signedIn();
-      allow create: if signedIn() &&
+      allow create: if isTeacher() || (signedIn() &&
         request.resource.data.studentUid == request.auth.uid &&
         request.resource.data.state == "reserved" &&
         isShortString(request.resource.data.bookingId, 180) &&
@@ -771,7 +771,7 @@ service cloud.firestore {
             getAfter(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.reservationClaimId == claimId &&
             getAfter(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.reservedCreditUnit == request.resource.data.unit
           )
-        );
+        ));
       allow update: if false;
       allow delete: if isTeacher() || (
         signedIn() && resource.data.studentUid == request.auth.uid &&

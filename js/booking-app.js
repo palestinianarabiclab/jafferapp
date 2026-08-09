@@ -1024,14 +1024,11 @@ function updateStudentBalanceUi() {
         const reservedLessons = Number(state.reservedPaidLessons || 0);
         const remainingLessons = Math.max(0, purchasedLessons - reservedLessons);
         if (remainingLessons > 0) {
-            remainingBadge.textContent = `(${purchasedLessons} remaining · ${reservedLessons} reserved · ${remainingLessons} available)`;
-            remainingBadge.style.background = "var(--primary)";
+            remainingBadge.innerHTML = `<span><small>Total</small><strong>${purchasedLessons}</strong></span><span><small>Reserved</small><strong>${reservedLessons}</strong></span><span class="is-available"><small>Available</small><strong>${remainingLessons}</strong></span>`;
         } else if (remainingLessons < 0) {
-            remainingBadge.textContent = `(Overdue by ${Math.abs(remainingLessons)} lesson${Math.abs(remainingLessons) === 1 ? "" : "s"})`;
-            remainingBadge.style.background = "#ef4444";
+            remainingBadge.innerHTML = `<span><small>Total</small><strong>${purchasedLessons}</strong></span><span><small>Reserved</small><strong>${reservedLessons}</strong></span><span class="is-overdue"><small>Overdue</small><strong>${Math.abs(remainingLessons)}</strong></span>`;
         } else {
-            remainingBadge.textContent = `(${purchasedLessons} remaining · ${reservedLessons} reserved · 0 available)`;
-            remainingBadge.style.background = "var(--ink-light)";
+            remainingBadge.innerHTML = `<span><small>Total</small><strong>${purchasedLessons}</strong></span><span><small>Reserved</small><strong>${reservedLessons}</strong></span><span class="is-empty"><small>Available</small><strong>0</strong></span>`;
         }
     }
 
@@ -3212,18 +3209,69 @@ async function commitTeacherBookingWithClaims(bookingRef, bookingData, publicBoo
     const slot = Number(bookingData.slot || 0);
     const durationMinutes = Number(bookingData.durationMinutes || bookingData.slotMinutes || 50);
     const claimIds = [getSlotClaimId(slot), ...getBookingIntervalClaimIds(slot, durationMinutes)];
+    const legacyReservationSnap = bookingData.studentUid
+        ? await window.db.collection("bookings").where("studentUid", "==", bookingData.studentUid).limit(200).get()
+        : null;
+    const legacyReservations = legacyReservationSnap
+        ? legacyReservationSnap.docs
+            .map((doc) => ({ id: doc.id, ...(doc.data() || {}) }))
+            .filter((booking) => isUnchargedPaidBooking(booking) && !booking.reservationClaimId)
+            .sort((a, b) => Number(a.createdAt || a.slot || 0) - Number(b.createdAt || b.slot || 0))
+        : [];
     await window.db.runTransaction(async (transaction) => {
+        const userRef = window.db.collection("users").doc(bookingData.studentUid || "missing-student");
+        const userSnap = await transaction.get(userRef);
+        if (!userSnap.exists) throw new Error("Student account was not found.");
         const claimRefs = claimIds.map((id) => window.db.collection("bookingSlotClaims").doc(id));
         const claimSnaps = [];
         for (const ref of claimRefs) claimSnaps.push(await transaction.get(ref));
         if (claimSnaps.some((snap) => snap.exists)) {
             throw new Error("That time overlaps another platform lesson.");
         }
+        const student = userSnap.data() || {};
+        const allowOverdraft = student.allowOverdraft === true;
+        const totalCredits = Math.min(500, Math.max(0, Math.floor(Number(student.lessonCredits || 0))));
+        let reservationClaimRef = null;
+        let reservedCreditUnit = 0;
+        if (!allowOverdraft) {
+            const creditRefs = Array.from({ length: totalCredits }, (_, index) => (
+                window.db.collection("lessonCreditClaims").doc(getCreditClaimId(bookingData.studentUid, index + 1))
+            ));
+            const creditSnaps = [];
+            for (const ref of creditRefs) creditSnaps.push(await transaction.get(ref));
+            const occupiedUnits = new Set();
+            creditSnaps.forEach((snap, index) => { if (snap.exists) occupiedUnits.add(index + 1); });
+            legacyReservations.forEach((legacyBooking) => {
+                const alreadyClaimed = creditSnaps.some((snap) => snap.exists && snap.data()?.bookingId === legacyBooking.id);
+                if (alreadyClaimed) return;
+                const legacyIndex = creditRefs.findIndex((ref, index) => !occupiedUnits.has(index + 1));
+                if (legacyIndex < 0) return;
+                const legacyUnit = legacyIndex + 1;
+                occupiedUnits.add(legacyUnit);
+                transaction.set(creditRefs[legacyIndex], {
+                    bookingId: legacyBooking.id,
+                    studentUid: bookingData.studentUid,
+                    unit: legacyUnit,
+                    slot: Number(legacyBooking.slot || 0),
+                    state: "reserved",
+                    source: "teacher-legacy-repair",
+                    migratedFromLegacy: true,
+                    createdAt: Number(legacyBooking.createdAt || Date.now()),
+                });
+            });
+            const freeIndex = creditRefs.findIndex((ref, index) => !occupiedUnits.has(index + 1));
+            if (freeIndex < 0) throw new Error("This student has no available lesson credit.");
+            reservationClaimRef = creditRefs[freeIndex];
+            reservedCreditUnit = freeIndex + 1;
+        }
         const now = Date.now();
         const safeBooking = {
             ...bookingData,
             slotClaimIds: claimIds,
             consumeAfter: slot + durationMinutes * 60000,
+            reservationState: allowOverdraft ? "overdraft" : "active",
+            reservationClaimId: reservationClaimRef?.id || "",
+            reservedCreditUnit,
             ...buildPendingCalendarState("create", bookingData, now),
         };
         const notificationJobs = createBookingNotificationJobs(transaction, bookingRef.id, safeBooking, { notifyTeacher: false });
@@ -3241,6 +3289,17 @@ async function commitTeacherBookingWithClaims(bookingRef, bookingData, publicBoo
             claimType: claimRef.id.startsWith("interval_") ? "interval" : "anchor",
             createdAt: now,
         }));
+        if (reservationClaimRef) {
+            transaction.set(reservationClaimRef, {
+                bookingId: bookingRef.id,
+                studentUid: bookingData.studentUid,
+                unit: reservedCreditUnit,
+                slot,
+                state: "reserved",
+                source: "teacher",
+                createdAt: now,
+            });
+        }
     });
 }
 
@@ -6819,18 +6878,29 @@ async function refreshTeacherStudents() {
         } else if (migrationAlreadyComplete) {
             state.privateAccountingMigrated = true;
         }
-        const [snap, accountingSnap, creditClaimsSnap] = await Promise.all([
+        const [snap, accountingSnap, creditClaimsSnap, futureBookingsSnap] = await Promise.all([
             window.db.collection("users").where("role", "==", "student").get(),
             window.db.collection("studentAccounting").limit(2000).get(),
             window.db.collection("lessonCreditClaims").limit(5000).get(),
+            window.db.collection("bookings").where("slot", ">", Date.now()).orderBy("slot", "asc").limit(500).get(),
         ]);
         const accountingByStudent = new Map();
         accountingSnap.forEach((doc) => accountingByStudent.set(doc.id, doc.data() || {}));
         const reservedByStudent = new Map();
+        const claimedBookingIds = new Set();
         creditClaimsSnap.forEach((doc) => {
             const claim = doc.data() || {};
             if (!claim.studentUid || claim.state !== "reserved") return;
+            if (claim.bookingId) claimedBookingIds.add(claim.bookingId);
             reservedByStudent.set(claim.studentUid, Number(reservedByStudent.get(claim.studentUid) || 0) + 1);
+        });
+        // Compatibility for teacher-created bookings saved before teacher
+        // scheduling began creating lessonCreditClaims.
+        futureBookingsSnap.forEach((doc) => {
+            if (claimedBookingIds.has(doc.id)) return;
+            const booking = doc.data() || {};
+            if (!booking.studentUid || booking.isFreeTrial === true || String(booking.status || "booked").toLowerCase() === "canceled" || booking.lessonConsumed === true) return;
+            reservedByStudent.set(booking.studentUid, Number(reservedByStudent.get(booking.studentUid) || 0) + 1);
         });
         const students = [];
         const migrations = [];

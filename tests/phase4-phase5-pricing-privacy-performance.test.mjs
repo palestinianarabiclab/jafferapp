@@ -57,3 +57,13 @@ test("package approval is idempotent and consumption uses package entitlement", 
 test("teacher busy calendar starts at today midnight so elapsed times remain visible today", () => {
     assert.match(worker, /action === 'getTeacherBusy'[\s\S]*?start\.setHours\(0, 0, 0, 0\)/);
 });
+test("teacher-created lessons reserve a student credit and legacy reservations remain visible", () => {
+    assert.match(app, /reservationClaimId: reservationClaimRef\?\.id/);
+    assert.match(app, /Compatibility for teacher-created bookings/);
+    assert.match(rules, /allow create: if isTeacher\(\) \|\| \(signedIn\(\)/);
+});
+test("student lesson credits render as separate total reserved and available metrics", () => {
+    assert.match(app, /<small>Total<\/small>/);
+    assert.match(app, /<small>Reserved<\/small>/);
+    assert.match(app, /<small>Available<\/small>/);
+});
