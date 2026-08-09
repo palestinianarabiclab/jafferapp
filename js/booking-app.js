@@ -52,6 +52,7 @@ import {
 import {
     createNotificationJob,
 } from "./logic/notificationSafety.js";
+import { getPackageLessonChargeCents } from "./logic/pricingSafety.js";
 import {
     createInitialProfileSettings,
     createInitialReviews,
@@ -1012,7 +1013,9 @@ function updateStudentBalanceUi() {
     }
 
     if (els.studentLessonPriceValue) {
-        els.studentLessonPriceValue.textContent = "Prices and accounting are managed privately by the teacher.";
+        els.studentLessonPriceValue.textContent = "";
+        els.studentLessonPriceValue.hidden = true;
+        els.studentLessonPriceValue.style.display = "none";
     }
 
     const remainingBadge = document.getElementById("studentRemainingLessonsBadge");
@@ -7150,6 +7153,91 @@ async function saveStudentFinance(studentId, balance, lessonPrice, accessData = 
     updateTeacherOverviewStats();
 }
 
+async function approveStudentPackage(studentId, student, packageLessons, packageAmount) {
+    const lessons = Math.max(1, Math.floor(Number(packageLessons || 0)));
+    const amount = toMoneyValue(packageAmount);
+    if (!studentId || lessons < 1 || amount <= 0) throw new Error("Package lessons and amount are required.");
+
+    const requestAt = Math.max(1, Math.floor(Number(student.courseAccessRequestedAt || Date.now())));
+    const packageId = `pkg_${studentId}_${requestAt}`;
+    const userRef = window.db.collection("users").doc(studentId);
+    const accountingRef = window.db.collection("studentAccounting").doc(studentId);
+    const entitlementRef = window.db.collection("lessonPackageEntitlements").doc(packageId);
+    const teacherRef = window.db.collection("teachers").doc(state.teacherUser.uid);
+    const now = Date.now();
+    let alreadyApproved = false;
+
+    await window.db.runTransaction(async (transaction) => {
+        const userSnap = await transaction.get(userRef);
+        const accountingSnap = await transaction.get(accountingRef);
+        const entitlementSnap = await transaction.get(entitlementRef);
+        const teacherSnap = await transaction.get(teacherRef);
+        if (!userSnap.exists) throw new Error("Student account was not found.");
+        if (entitlementSnap.exists) {
+            alreadyApproved = true;
+            return;
+        }
+
+        const freshStudent = userSnap.data() || {};
+        const accounting = accountingSnap.exists ? (accountingSnap.data() || {}) : {};
+        const teacher = teacherSnap.exists ? (teacherSnap.data() || {}) : {};
+        const oldBalance = toMoneyValue(accounting.balance);
+        const newBalance = toMoneyValue(oldBalance + amount);
+        const currentCredits = Math.max(0, Math.floor(Number(freshStudent.lessonCredits || 0)));
+        const amountPaidCents = Math.round(amount * 100);
+        const tx = {
+            id: `package_${packageId}`,
+            at: now,
+            amount,
+            type: "package-payment",
+            description: `Package approved: ${lessons} lessons for ${formatMoney(amount)}`,
+            newBalance,
+            lessonCreditAdjustment: lessons,
+            lessonCreditsAfter: currentCredits + lessons,
+            packageId,
+        };
+
+        transaction.set(entitlementRef, {
+            packageId,
+            studentUid: studentId,
+            label: String(student.requestedPackage || `${lessons} lessons`).slice(0, 180),
+            totalLessons: lessons,
+            remainingLessons: lessons,
+            consumedLessons: 0,
+            amountPaid: amount,
+            amountPaidCents,
+            remainingValueCents: amountPaidCents,
+            currency: "USD",
+            status: "active",
+            requestCreatedAt: requestAt,
+            createdAt: now,
+            updatedAt: now,
+        });
+        transaction.set(userRef, {
+            lessonCredits: currentCredits + lessons,
+            courseAccessRequested: false,
+            paymentStatus: "approved",
+            paymentNote: `Package approved: ${lessons} lessons for ${formatMoney(amount)}`,
+            updatedAt: window.firebase.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        transaction.set(accountingRef, {
+            balance: newBalance,
+            totalPaid: toMoneyValue(accounting.totalPaid) + amount,
+            transactions: window.firebase.firestore.FieldValue.arrayUnion(tx),
+            financeUpdatedAt: now,
+            updatedAt: now,
+        }, { merge: true });
+        transaction.set(teacherRef, {
+            revenueTotal: toMoneyValue(teacher.revenueTotal) + amount,
+            revenueUpdatedAt: now,
+        }, { merge: true });
+    });
+
+    if (!alreadyApproved) state.teacherRevenueTotal = Number(state.teacherRevenueTotal || 0) + amount;
+    updateTeacherOverviewStats();
+    return { packageId, alreadyApproved };
+}
+
 async function markStudentTrialUsed(studentId) {
     if (!studentId) throw new Error("Choose a student first.");
     await window.db.collection("users").doc(studentId).set({
@@ -7323,6 +7411,17 @@ async function reconcileStudentBalances() {
                 .get();
             claimRefs = claims.docs.map((claimDoc) => claimDoc.ref);
         }
+        const packageEntitlementSnap = initialBooking.isFreeTrial === true
+            ? null
+            : await window.db.collection("lessonPackageEntitlements")
+                .where("studentUid", "==", initialBooking.studentUid)
+                .limit(50)
+                .get();
+        const packageRefs = packageEntitlementSnap
+            ? packageEntitlementSnap.docs
+                .sort((a, b) => Number(a.data()?.createdAt || 0) - Number(b.data()?.createdAt || 0))
+                .map((packageDoc) => packageDoc.ref)
+            : [];
 
         let consumed = false;
         let missingLessonPrice = false;
@@ -7334,6 +7433,8 @@ async function reconcileStudentBalances() {
             const bookingAccountingSnap = await transaction.get(bookingAccountingRef);
             const claimSnaps = [];
             for (const claimRef of claimRefs) claimSnaps.push(await transaction.get(claimRef));
+            const packageSnaps = [];
+            for (const packageRef of packageRefs) packageSnaps.push(await transaction.get(packageRef));
             if (!bookingSnap.exists || ledgerSnap.exists || !studentSnap.exists) return;
 
             const booking = bookingSnap.data() || {};
@@ -7343,7 +7444,25 @@ async function reconcileStudentBalances() {
             const studentAccounting = studentAccountingSnap.exists ? (studentAccountingSnap.data() || {}) : {};
             const priceSnapshot = bookingAccountingSnap.exists ? (bookingAccountingSnap.data() || {}) : {};
             const isFreeTrial = booking.isFreeTrial === true;
-            const lessonPrice = isFreeTrial ? 0 : toMoneyValue(priceSnapshot.effectivePrice);
+            let lessonPrice = isFreeTrial ? 0 : toMoneyValue(priceSnapshot.effectivePrice);
+            let packageEntitlement = null;
+            let packageEntitlementRef = null;
+            if (!isFreeTrial) {
+                const packageIndex = packageSnaps.findIndex((packageSnap) => {
+                    if (!packageSnap.exists) return false;
+                    const value = packageSnap.data() || {};
+                    return String(value.status || "active") === "active" && Number(value.remainingLessons || 0) > 0;
+                });
+                if (packageIndex >= 0) {
+                    packageEntitlement = packageSnaps[packageIndex].data() || {};
+                    packageEntitlementRef = packageRefs[packageIndex];
+                    lessonPrice = getPackageLessonChargeCents(
+                        packageEntitlement.amountPaidCents,
+                        packageEntitlement.totalLessons,
+                        packageEntitlement.consumedLessons
+                    ) / 100;
+                }
+            }
             if (!isFreeTrial && lessonPrice <= 0) {
                 missingLessonPrice = true;
                 return;
@@ -7359,6 +7478,7 @@ async function reconcileStudentBalances() {
                 description: isFreeTrial ? "First free lesson" : `Lesson deduction: ${new Date(booking.slot).toLocaleString()}`,
                 newBalance: nextBalance,
                 bookingId: doc.id,
+                packageId: packageEntitlement?.packageId || null,
             };
             const accountingUpdate = {
                 balance: nextBalance,
@@ -7372,6 +7492,28 @@ async function reconcileStudentBalances() {
             }
             transaction.set(userRef, studentUpdate, { merge: true });
             transaction.set(studentAccountingRef, accountingUpdate, { merge: true });
+            if (packageEntitlementRef && packageEntitlement) {
+                const chargeCents = Math.round(lessonPrice * 100);
+                const nextRemainingLessons = Math.max(0, Number(packageEntitlement.remainingLessons || 0) - 1);
+                transaction.set(packageEntitlementRef, {
+                    remainingLessons: nextRemainingLessons,
+                    consumedLessons: Math.min(Number(packageEntitlement.totalLessons || 0), Number(packageEntitlement.consumedLessons || 0) + 1),
+                    remainingValueCents: Math.max(0, Number(packageEntitlement.remainingValueCents || 0) - chargeCents),
+                    status: nextRemainingLessons > 0 ? "active" : "consumed",
+                    updatedAt: consumedAt,
+                }, { merge: true });
+                transaction.set(bookingAccountingRef, {
+                    bookingId: doc.id,
+                    studentUid: booking.studentUid,
+                    effectivePrice: lessonPrice,
+                    currency: "USD",
+                    pricingSource: "package",
+                    packageId: packageEntitlement.packageId || packageEntitlementRef.id,
+                    packageTotalLessons: Number(packageEntitlement.totalLessons || 0),
+                    packageAmountPaid: toMoneyValue(Number(packageEntitlement.amountPaidCents || 0) / 100),
+                    capturedAt: consumedAt,
+                }, { merge: true });
+            }
             transaction.set(bookingRef, {
                 lessonConsumed: true,
                 consumedAt,
@@ -7391,7 +7533,8 @@ async function reconcileStudentBalances() {
                 studentUid: booking.studentUid,
                 amount: lessonPrice,
                 currency: priceSnapshot.currency || "USD",
-                pricingSource: priceSnapshot.pricingSource || (isFreeTrial ? "free-trial" : "legacy-unavailable"),
+                pricingSource: packageEntitlement ? "package" : (priceSnapshot.pricingSource || (isFreeTrial ? "free-trial" : "legacy-unavailable")),
+                packageId: packageEntitlement?.packageId || null,
                 defaultPriceAtBooking: priceSnapshot.defaultPriceAtBooking ?? null,
                 customPriceAtBooking: priceSnapshot.customPriceAtBooking ?? null,
                 priceSnapshotCapturedAt: priceSnapshot.capturedAt || 0,
@@ -8282,22 +8425,20 @@ function wireTeacherActions() {
             const lessonPrice = getConfiguredLessonPrice();
 
             withButtonLoading(quickCreditBtn, "Adding...", async () => {
-                await saveStudentFinance(studentId, newBalance, lessonPrice, {
-                    courseAccess: student.courseAccess === true,
-                    accessType: student.accessType || "manual",
-                    paymentStatus: "approved",
-                    paymentNote: `Added +$${creditAmount} credit (Previous: $${currentBalance})`,
-                    courseAccessRequested: false,
-                    lessonCredits: isPackageApproval
-                        ? (Object.prototype.hasOwnProperty.call(student, "lessonCredits")
-                            ? Number(student.lessonCredits || 0)
-                            : Math.max(0, Math.floor(currentBalance / Math.max(lessonPrice, 0.01)))) + packageLessons
-                        : Number(student.lessonCredits || 0),
-                    totalPaid: isPackageApproval
-                        ? Number(student.totalPaid || 0) + creditAmount
-                        : Number(student.totalPaid || 0),
-                    adjustmentType: "payment",
-                });
+                if (isPackageApproval) {
+                    await approveStudentPackage(studentId, student, packageLessons, creditAmount);
+                } else {
+                    await saveStudentFinance(studentId, newBalance, lessonPrice, {
+                        courseAccess: student.courseAccess === true,
+                        accessType: student.accessType || "manual",
+                        paymentStatus: "approved",
+                        paymentNote: `Added +$${creditAmount} credit (Previous: $${currentBalance})`,
+                        courseAccessRequested: false,
+                        lessonCredits: Number(student.lessonCredits || 0),
+                        totalPaid: Number(student.totalPaid || 0),
+                        adjustmentType: "payment",
+                    });
+                }
                 await refreshTeacherStudents();
                 setStatus(els.teacherStudentsMsg, isPackageApproval
                     ? `Confirmed ${packageLessons} lessons and ${formatMoney(creditAmount)} paid for ${student.name || "student"}.`

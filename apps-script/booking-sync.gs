@@ -516,9 +516,116 @@ function firestoreIamRequest_(config, path, options) {
   const text = response.getContentText();
   const data = text ? JSON.parse(text) : {};
   if (response.getResponseCode() >= 300) {
-    throw new Error(data.error && data.error.message ? data.error.message : 'Firestore IAM request failed (' + response.getResponseCode() + ').');
+    const status = response.getResponseCode();
+    const apiMessage = data.error && (data.error.message || data.error.status)
+      ? String(data.error.message || data.error.status)
+      : String(text || '').slice(0, 500);
+    if (status === 403) {
+      const identity = getOAuthIdentityDiagnostic_();
+      const executingAccount = identity.email || getDefaultNotificationEmail_() || '(current Apps Script account)';
+      throw new Error(
+        'Firestore access denied for ' + executingAccount + ' on project ' + config.firebaseProjectId +
+        '. Grant this account the Cloud Datastore User IAM role and re-authorize the script datastore scope.' +
+        ' OAuth datastore scope: ' + (identity.hasDatastoreScope ? 'present' : 'MISSING') + '.' +
+        ' OAuth cloud-platform scope: ' + (identity.hasCloudPlatformScope ? 'present' : 'MISSING') + '.' +
+        (apiMessage ? ' Google response: ' + apiMessage : '')
+      );
+    }
+    throw new Error(apiMessage || 'Firestore IAM request failed (' + status + ').');
   }
   return data;
+}
+
+function getOAuthIdentityDiagnostic_() {
+  try {
+    const token = ScriptApp.getOAuthToken();
+    const response = UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?access_token=' + encodeURIComponent(token), {
+      muteHttpExceptions: true,
+    });
+    const data = JSON.parse(response.getContentText() || '{}');
+    const scopes = String(data.scope || '').split(/\s+/).filter(String);
+    return {
+      email: normalizeEmail_(data.email || ''),
+      hasDatastoreScope: scopes.indexOf('https://www.googleapis.com/auth/datastore') !== -1,
+      hasCloudPlatformScope: scopes.indexOf('https://www.googleapis.com/auth/cloud-platform') !== -1,
+    };
+  } catch (err) {
+    return { email: '', hasDatastoreScope: false, hasCloudPlatformScope: false };
+  }
+}
+
+function diagnoseBackendAuthorization() {
+  const config = getConfig_();
+  const identity = getOAuthIdentityDiagnostic_();
+  const result = {
+    firebaseProjectId: config.firebaseProjectId,
+    oauthEmail: identity.email || '(email unavailable)',
+    datastoreScope: identity.hasDatastoreScope ? 'present' : 'MISSING',
+    cloudPlatformScope: identity.hasCloudPlatformScope ? 'present' : 'MISSING',
+  };
+  console.log(JSON.stringify(result));
+  return result;
+}
+
+function diagnoseFirestoreAccess() {
+  ScriptApp.requireAllScopes(ScriptApp.AuthMode.FULL);
+  const config = getConfig_();
+  const token = ScriptApp.getOAuthToken();
+  const headers = { Authorization: 'Bearer ' + token };
+  const databaseName = 'projects/' + config.firebaseProjectId + '/databases/(default)';
+
+  const databaseResponse = UrlFetchApp.fetch('https://firestore.googleapis.com/v1/' + databaseName, {
+    method: 'get',
+    headers: headers,
+    muteHttpExceptions: true,
+  });
+
+  const iamResponse = UrlFetchApp.fetch(
+    'https://cloudresourcemanager.googleapis.com/v1/projects/' + encodeURIComponent(config.firebaseProjectId) + ':testIamPermissions',
+    {
+      method: 'post',
+      contentType: 'application/json',
+      headers: headers,
+      payload: JSON.stringify({ permissions: [
+        'datastore.databases.get',
+        'datastore.entities.get',
+        'datastore.entities.list',
+        'datastore.entities.create',
+        'datastore.entities.update',
+        'datastore.entities.delete',
+      ] }),
+      muteHttpExceptions: true,
+    }
+  );
+
+  const queryResponse = UrlFetchApp.fetch(firestoreBaseUrl_(config.firebaseProjectId) + ':runQuery', {
+    method: 'post',
+    contentType: 'application/json',
+    headers: headers,
+    payload: JSON.stringify({ structuredQuery: {
+      from: [{ collectionId: 'bookings' }],
+      limit: 1,
+    } }),
+    muteHttpExceptions: true,
+  });
+
+  function responseSummary_(response) {
+    const body = response.getContentText() || '';
+    return {
+      status: response.getResponseCode(),
+      body: response.getResponseCode() >= 300 ? body.slice(0, 1000) : 'OK',
+    };
+  }
+
+  const result = {
+    projectId: config.firebaseProjectId,
+    oauth: getOAuthIdentityDiagnostic_(),
+    databaseGet: responseSummary_(databaseResponse),
+    projectIamPermissions: responseSummary_(iamResponse),
+    firestoreRunQuery: responseSummary_(queryResponse),
+  };
+  console.log(JSON.stringify(result));
+  return result;
 }
 
 function fsValue_(value) {
@@ -1135,6 +1242,43 @@ function installCalendarSyncTrigger() {
   return { success: true, triggerInstalled: true, message: 'Automatic Calendar/Firestore sync installed (every 5 minutes).' };
 }
 
+/**
+ * Run once from the Apps Script editor as the Calendar owner. This explicitly
+ * authorizes both CalendarApp and the Advanced Calendar service used to create
+ * a unique Google Meet link, then reinstalls the durable retry worker.
+ */
+function authorizeGoogleCalendarIntegration() {
+  ScriptApp.requireAllScopes(ScriptApp.AuthMode.FULL);
+  const config = getConfig_();
+  const calendarId = config.primaryCalendarId || 'primary';
+  const calendar = CalendarApp.getCalendarById(calendarId);
+  if (!calendar) {
+    throw new Error('Primary calendar not found. Check PRIMARY_CALENDAR_ID in Script Properties.');
+  }
+
+  Calendar.Events.list(calendarId, {
+    maxResults: 1,
+    singleEvents: true,
+    timeMin: new Date(Date.now() - 60000).toISOString(),
+  });
+
+  if (!calendar.isOwnedByMe()) {
+    throw new Error('The executing Google account does not own the primary calendar. Run this setup as Jaffer or use a calendar where that account can edit events.');
+  }
+
+  // Verify the same executing account can read the Firestore project used by
+  // the background worker. A Firebase in-app teacher role is not an IAM role.
+  listFirestoreBookingsIam_(config);
+
+  const triggerResult = installCalendarSyncTrigger();
+  return {
+    success: true,
+    calendarId: calendarId,
+    triggerInstalled: triggerResult.triggerInstalled === true,
+    message: 'Google Calendar authorization verified. Pending bookings will retry automatically within five minutes.',
+  };
+}
+
 function parseCalendarIds_(value) {
   return String(value || '')
     .split(/[\n,]+/)
@@ -1556,7 +1700,11 @@ function handleRequest_(e) {
       const days = Math.max(1, Math.min(90, Number(req.days || 30)));
       const timeZone = req.timeZone || config.defaultTimeZone;
       const calendarIds = getBusyCalendarIds_(config);
+      // Keep every event from the current local day visible to the teacher,
+      // including lessons whose end time has already passed. Yesterday is not
+      // included, and student availability still receives future events only.
       const start = new Date();
+      start.setHours(0, 0, 0, 0);
       const end = new Date(start.getTime() + days * 24 * 60 * 60 * 1000);
       let events = [];
       calendarIds.forEach(function (calendarId) {

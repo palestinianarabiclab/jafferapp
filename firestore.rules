@@ -784,6 +784,10 @@ service cloud.firestore {
       allow create, update, delete: if isTeacher();
     }
 
+    match /lessonPackageEntitlements/{packageId} {
+      allow read, create, update, delete: if isTeacher();
+    }
+
     match /studentAccounting/{studentUid} {
       allow read, create, update, delete: if isTeacher();
     }

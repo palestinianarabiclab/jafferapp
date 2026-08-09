@@ -31,6 +31,16 @@ export function preservePriceSnapshot(existing, replacement) {
     return existing?.effectivePrice != null ? { ...existing } : replacement;
 }
 
+export function getPackageLessonChargeCents(amountPaidCents, totalLessons, consumedLessons = 0) {
+    const cents = Math.max(0, Math.floor(Number(amountPaidCents || 0)));
+    const lessons = Math.max(1, Math.floor(Number(totalLessons || 0)));
+    const consumed = Math.max(0, Math.floor(Number(consumedLessons || 0)));
+    if (!cents || consumed >= lessons) return 0;
+    const base = Math.floor(cents / lessons);
+    const remainder = cents % lessons;
+    return base + (consumed < remainder ? 1 : 0);
+}
+
 export function stripStudentFinancialFields(profile = {}) {
     const financial = new Set(["balance", "lessonPrice", "totalPaid", "transactions", "financeUpdatedAt"]);
     return Object.fromEntries(Object.entries(profile).filter(([key]) => !financial.has(key)));
