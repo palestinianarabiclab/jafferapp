@@ -74,3 +74,7 @@ test("canceled student bookings allow safe notification follow-up and refresh li
     assert.match(rules, /'teacherNotificationStatus'/);
     assert.match(app, /Promise\.all\(\[loadStudentBookings\(\), renderBookingCalendar\(\)\]\)/);
 });
+test("booking snapshots do not trigger balance reconciliation loops", () => {
+    assert.doesNotMatch(app, /teacherStudentsRefreshTimer = window\.setTimeout\(async \(\) => \{[\s\S]{0,300}reconcileStudentBalances/);
+    assert.doesNotMatch(app, /slotClaimIds\.forEach\(\(claimId\) => transaction\.delete/);
+});

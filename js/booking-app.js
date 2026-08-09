@@ -1506,13 +1506,10 @@ function startTeacherCalendarAutoRefresh() {
         if (state.teacherBookingsRefreshTimer) window.clearTimeout(state.teacherBookingsRefreshTimer);
         state.teacherBookingsRefreshTimer = window.setTimeout(() => refreshIfVisible(false), 400);
         if (state.teacherStudentsRefreshTimer) window.clearTimeout(state.teacherStudentsRefreshTimer);
-        state.teacherStudentsRefreshTimer = window.setTimeout(async () => {
-            try {
-                await reconcileStudentBalances();
-                await refreshTeacherStudents();
-            } catch (error) {
-                console.warn("Could not refresh student balances after a booking change.", error);
-            }
+        // Do not reconcile from a booking snapshot. Reconciliation writes to
+        // bookings and would emit another snapshot, creating a quota-heavy loop.
+        state.teacherStudentsRefreshTimer = window.setTimeout(() => {
+            refreshTeacherStudents().catch((error) => console.warn("Could not refresh student balances after a booking change.", error));
         }, 650);
         }, (error) => console.warn("Teacher booking listener failed.", error));
     refreshIfVisible(true);
@@ -6913,7 +6910,7 @@ async function refreshTeacherStudents() {
         const storedDefaultPrice = privatePricingSnap.exists ? toMoneyValue(privatePricingSnap.data()?.defaultLessonPrice) : 0;
         if (storedDefaultPrice > 0) state.profileSettings.rateText = `$${storedDefaultPrice}`;
         const configuredDefaultPrice = storedDefaultPrice || getConfiguredLessonPrice();
-        if (configuredDefaultPrice > 0) {
+        if (configuredDefaultPrice > 0 && storedDefaultPrice <= 0) {
             await window.db.collection("teacherAccountingSettings").doc("primary").set({
                 defaultLessonPrice: configuredDefaultPrice,
                 currency: "USD",
@@ -7687,10 +7684,9 @@ async function reconcileStudentBalances() {
             claimRefs.forEach((claimRef, index) => {
                 if (claimSnaps[index]?.exists) transaction.delete(claimRef);
             });
-            const slotClaimIds = Array.isArray(booking.slotClaimIds) && booking.slotClaimIds.length
-                ? booking.slotClaimIds
-                : [getSlotClaimId(booking.slot)];
-            slotClaimIds.forEach((claimId) => transaction.delete(window.db.collection("bookingSlotClaims").doc(claimId)));
+            // Past interval claims use absolute timestamps and cannot block a
+            // future booking. Keep them to avoid 10+ unnecessary deletes for
+            // every completed lesson. Cancel/reschedule still releases claims.
             consumed = true;
         });
         if (missingLessonPrice) missingPrice.add(initialBooking.studentUid);
