@@ -111,6 +111,7 @@ const state = {
     teacherCalendarResize: null,
     teacherCalendarTouch: null,
     studentBookingsUnsubscribe: null,
+    studentBookingsRefreshTimer: null,
     teacherRevenueTotal: 0,
     studentCache: new Map(),
     googleCalendarMessage: "",
@@ -2609,6 +2610,8 @@ function stopStudentBookingsListener() {
         state.studentBookingsUnsubscribe();
     }
     state.studentBookingsUnsubscribe = null;
+    if (state.studentBookingsRefreshTimer) window.clearTimeout(state.studentBookingsRefreshTimer);
+    state.studentBookingsRefreshTimer = null;
 }
 
 function startStudentBookingsListener() {
@@ -2630,7 +2633,10 @@ function startStudentBookingsListener() {
             state.reservedPaidLessons = reserved;
             state.pendingLateCancellationCount = pendingLateCancellations;
             updateStudentAuthUi();
-            loadBookingCalendar({ force: true }).catch((error) => console.warn("Could not refresh student availability.", error));
+            if (state.studentBookingsRefreshTimer) window.clearTimeout(state.studentBookingsRefreshTimer);
+            state.studentBookingsRefreshTimer = window.setTimeout(() => {
+                renderBookingCalendar().catch((error) => console.warn("Could not refresh student availability.", error));
+            }, 250);
         }, (error) => console.warn("Could not watch student bookings.", error));
 }
 
