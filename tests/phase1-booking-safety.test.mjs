@@ -5,6 +5,7 @@ import {
     calculatePostConsumptionLessonCredits,
     getBookingSlotClaimId,
     getLessonEndAt,
+    isChargeableLateCancellation,
     selectAvailableCreditUnit,
     shouldConsumeLesson,
 } from "../js/logic/bookingSafety.js";
@@ -59,6 +60,30 @@ test("11. repeated cancellation has no consumption path", () => {
     const canceled = { studentUid: "u", status: "canceled", reservationState: "released", slot: 1 };
     assert.equal(shouldConsumeLesson(canceled, Date.now()), false);
     assert.equal(shouldConsumeLesson(canceled, Date.now()), false);
+});
+
+test("11b. student cancellation inside 12 hours consumes exactly once", () => {
+    const canceledAt = 1_000_000;
+    const booking = {
+        studentUid: "u",
+        status: "canceled",
+        canceledBy: "student",
+        canceledAt,
+        slot: canceledAt + 60 * 60 * 1000,
+        durationMinutes: 50,
+        isFreeTrial: false,
+    };
+    assert.equal(isChargeableLateCancellation(booking), true);
+    assert.equal(shouldConsumeLesson(booking, canceledAt), true);
+    assert.equal(shouldConsumeLesson(booking, canceledAt, true), false);
+});
+
+test("11c. early, teacher, and free-trial cancellations are not charged", () => {
+    const canceledAt = 1_000_000;
+    const base = { studentUid: "u", status: "canceled", canceledBy: "student", canceledAt, slot: canceledAt + 13 * 60 * 60 * 1000 };
+    assert.equal(isChargeableLateCancellation(base), false);
+    assert.equal(isChargeableLateCancellation({ ...base, slot: canceledAt + 60 * 60 * 1000, canceledBy: "teacher" }), false);
+    assert.equal(isChargeableLateCancellation({ ...base, slot: canceledAt + 60 * 60 * 1000, isFreeTrial: true }), false);
 });
 
 test("12. rescheduling changes the slot claim but not credit quantity", () => {

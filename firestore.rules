@@ -537,7 +537,7 @@ service cloud.firestore {
         hasValidMeetingLink(request.resource.data) &&
         request.resource.data.status == "booked" &&
         (!request.resource.data.keys().hasAny(['bookingOperationId']) || isShortString(request.resource.data.bookingOperationId, 180)) &&
-        (!request.resource.data.keys().hasAny(['reservationState']) || request.resource.data.reservationState in ["active", "not-required", "released", "consumed"]) &&
+        (!request.resource.data.keys().hasAny(['reservationState']) || request.resource.data.reservationState in ["active", "not-required", "released", "pending-consumption", "consumed"]) &&
         (!request.resource.data.keys().hasAny(['reservationClaimId']) || isShortString(request.resource.data.reservationClaimId, 180)) &&
         (!request.resource.data.keys().hasAny(['reservedCreditUnit']) || isNumber(request.resource.data.reservedCreditUnit)) &&
         (!request.resource.data.keys().hasAny(['consumeAfter']) || (isTimestampNumber(request.resource.data.consumeAfter) && request.resource.data.consumeAfter == request.resource.data.slot + request.resource.data.durationMinutes * 60 * 1000)) &&

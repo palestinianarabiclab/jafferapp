@@ -42,6 +42,7 @@ import {
     getBookingIntervalClaimIds,
     getLessonEndAt,
     isLessonHistorical,
+    isChargeableLateCancellation,
     shouldConsumeLesson,
 } from "./logic/bookingSafety.js";
 import {
@@ -91,6 +92,7 @@ const state = {
     reviewsExpanded: false,
     selectedPackage: null,
     reservedPaidLessons: 0,
+    pendingLateCancellationCount: 0,
     runtimeBusyBlocks: [],
     selectedSlotMs: null,
     selectedDateKey: "",
@@ -117,6 +119,7 @@ const state = {
     teacherCalendarRefreshTimer: null,
     teacherBookingsUnsubscribe: null,
     teacherBookingsRefreshTimer: null,
+    teacherStudentsRefreshTimer: null,
     teacherLastCalendarRefreshAt: 0,
     balanceReconcileTimer: null,
     studentProfileUnsubscribe: null,
@@ -760,7 +763,7 @@ function getConfiguredLessonPrice() {
 }
 
 function getStudentTotalLessonCredits(profile = state.studentProfile || {}) {
-    return Math.max(0, Math.floor(Number(profile.lessonCredits || 0)));
+    return Math.max(0, Math.floor(Number(profile.lessonCredits || 0)) - Number(state.pendingLateCancellationCount || 0));
 }
 
 function isUnchargedPaidBooking(booking) {
@@ -1481,6 +1484,8 @@ function stopTeacherCalendarAutoRefresh() {
     state.teacherBookingsUnsubscribe = null;
     if (state.teacherBookingsRefreshTimer) window.clearTimeout(state.teacherBookingsRefreshTimer);
     state.teacherBookingsRefreshTimer = null;
+    if (state.teacherStudentsRefreshTimer) window.clearTimeout(state.teacherStudentsRefreshTimer);
+    state.teacherStudentsRefreshTimer = null;
 }
 
 function startTeacherCalendarAutoRefresh() {
@@ -1499,6 +1504,15 @@ function startTeacherCalendarAutoRefresh() {
         .onSnapshot(() => {
         if (state.teacherBookingsRefreshTimer) window.clearTimeout(state.teacherBookingsRefreshTimer);
         state.teacherBookingsRefreshTimer = window.setTimeout(() => refreshIfVisible(false), 400);
+        if (state.teacherStudentsRefreshTimer) window.clearTimeout(state.teacherStudentsRefreshTimer);
+        state.teacherStudentsRefreshTimer = window.setTimeout(async () => {
+            try {
+                await reconcileStudentBalances();
+                await refreshTeacherStudents();
+            } catch (error) {
+                console.warn("Could not refresh student balances after a booking change.", error);
+            }
+        }, 650);
         }, (error) => console.warn("Teacher booking listener failed.", error));
     refreshIfVisible(true);
 }
@@ -2599,6 +2613,25 @@ function stopStudentBookingsListener() {
 
 function startStudentBookingsListener() {
     stopStudentBookingsListener();
+    if (!window.db || !state.currentUser || state.currentRole !== "student") return;
+    state.studentBookingsUnsubscribe = window.db.collection("bookings")
+        .where("studentUid", "==", state.currentUser.uid)
+        .limit(200)
+        .onSnapshot((snapshot) => {
+            let reserved = 0;
+            let pendingLateCancellations = 0;
+            snapshot.forEach((doc) => {
+                const booking = doc.data() || {};
+                if (isUnchargedPaidBooking(booking)) reserved += 1;
+                if (isChargeableLateCancellation(booking, STUDENT_CHANGE_CUTOFF_MS) && booking.lessonConsumed !== true && !booking.balanceChargedAt) {
+                    pendingLateCancellations += 1;
+                }
+            });
+            state.reservedPaidLessons = reserved;
+            state.pendingLateCancellationCount = pendingLateCancellations;
+            updateStudentAuthUi();
+            loadBookingCalendar({ force: true }).catch((error) => console.warn("Could not refresh student availability.", error));
+        }, (error) => console.warn("Could not watch student bookings.", error));
 }
 
 async function cancelStudentBooking(bookingId) {
@@ -2621,7 +2654,7 @@ async function cancelStudentBooking(bookingId) {
         calendarSyncLastError: "",
         canceledAt,
         canceledBy: "student",
-        reservationState: booking.isFreeTrial === true ? "not-required" : "released",
+        reservationState: booking.isFreeTrial === true ? "not-required" : (isLateCancel ? "pending-consumption" : "released"),
         history: window.firebase.firestore.FieldValue.arrayUnion({
             at: canceledAt,
             action: "canceled",
@@ -2634,39 +2667,46 @@ async function cancelStudentBooking(bookingId) {
         updatedAt: canceledAt,
         calendarSynced: false,
     }, { merge: true });
-    const cancellationJobs = createEventNotificationJobs(
-        cancelBatch,
-        bookingId,
-        booking,
-        "cancellation",
-        canceledAt,
-        "student",
-        { notifyTeacher: true, notifyStudent: false }
-    );
-    cancelBatch.set(window.db.collection("bookings").doc(bookingId), notificationSummaryFields(cancellationJobs.teacherJob, cancellationJobs.studentJob, canceledAt), { merge: true });
+    await cancelBatch.commit();
+
+    // Cleanup and notification delivery are deliberately separate from the core
+    // cancellation. A stale legacy claim or notification permission must never
+    // roll back a valid student cancellation.
+    const cleanupBatch = window.db.batch();
     const slotClaimIds = Array.isArray(booking.slotClaimIds) && booking.slotClaimIds.length
         ? booking.slotClaimIds
         : (booking.bookingOperationId ? [getSlotClaimId(booking.slot)] : []);
-    slotClaimIds.forEach((claimId) => cancelBatch.delete(window.db.collection("bookingSlotClaims").doc(claimId)));
+    slotClaimIds.forEach((claimId) => cleanupBatch.delete(window.db.collection("bookingSlotClaims").doc(claimId)));
     if (booking.reservationClaimId) {
-        cancelBatch.delete(window.db.collection("lessonCreditClaims").doc(booking.reservationClaimId));
+        if (!isLateCancel) cleanupBatch.delete(window.db.collection("lessonCreditClaims").doc(booking.reservationClaimId));
     } else if (booking.isFreeTrial !== true) {
         const claimSnap = await window.db.collection("lessonCreditClaims")
             .where("studentUid", "==", booking.studentUid)
             .where("bookingId", "==", bookingId)
             .limit(5)
             .get();
-        claimSnap.forEach((doc) => cancelBatch.delete(doc.ref));
+        if (!isLateCancel) claimSnap.forEach((doc) => cleanupBatch.delete(doc.ref));
     }
     if (booking.isFreeTrial === true && booking.studentUid) {
-        cancelBatch.set(window.db.collection("users").doc(booking.studentUid), {
+        cleanupBatch.set(window.db.collection("users").doc(booking.studentUid), {
             trialUsed: false,
             trialUsedAt: window.firebase.firestore.FieldValue.delete(),
             updatedAt: window.firebase.firestore.FieldValue.serverTimestamp(),
         }, { merge: true });
-        cancelBatch.delete(window.db.collection("trialClaims").doc(booking.studentUid));
+        cleanupBatch.delete(window.db.collection("trialClaims").doc(booking.studentUid));
     }
-    await cancelBatch.commit();
+    await cleanupBatch.commit().catch((error) => console.warn("Cancellation cleanup will be retried by reconciliation.", error));
+    try {
+        const notificationBatch = window.db.batch();
+        const cancellationJobs = createEventNotificationJobs(
+            notificationBatch, bookingId, booking, "cancellation", canceledAt, "student",
+            { notifyTeacher: true, notifyStudent: false }
+        );
+        notificationBatch.set(window.db.collection("bookings").doc(bookingId), notificationSummaryFields(cancellationJobs.teacherJob, cancellationJobs.studentJob, canceledAt), { merge: true });
+        await notificationBatch.commit();
+    } catch (error) {
+        console.warn("Cancellation saved, but its notification job could not be queued.", error);
+    }
     let calendarDeletePending = true;
     if ((booking.googleCalendarEventId || bookingId) && typeof window.deleteBookingViaAppsScript === "function") {
         const result = await window.deleteBookingViaAppsScript({
@@ -7361,6 +7401,26 @@ async function loadBalanceChargeCandidates(now) {
         addDocs(fallbackSnap);
     }
 
+    try {
+        const canceledSnap = await window.db.collection("bookings")
+            .where("status", "==", "canceled")
+            .orderBy("slot", "desc")
+            .limit(200)
+            .get();
+        addDocs(canceledSnap);
+    } catch {
+        try {
+            const canceledFallback = await window.db.collection("bookings")
+                .where("status", "==", "canceled")
+                .limit(200)
+                .get();
+            addDocs(canceledFallback);
+        } catch {
+            // The regular query still handles completed lessons if an old
+            // deployment temporarily rejects the optional cancellation query.
+        }
+    }
+
     return Array.from(docsById.values());
 }
 
@@ -7463,7 +7523,8 @@ async function reconcileStudentBalances() {
         const initialBooking = doc.data() || {};
         const initialStatus = String(initialBooking.status || "booked").toLowerCase();
         const lessonEndAt = getLessonEndAt(initialBooking);
-        if (!initialBooking.studentUid || initialStatus === "canceled" || lessonEndAt > Date.now()) continue;
+        const initialLateCancellation = isChargeableLateCancellation(initialBooking, STUDENT_CHANGE_CUTOFF_MS);
+        if (!initialBooking.studentUid || (initialStatus === "canceled" && !initialLateCancellation) || (!initialLateCancellation && lessonEndAt > Date.now())) continue;
 
         const bookingRef = window.db.collection("bookings").doc(doc.id);
         const userRef = window.db.collection("users").doc(initialBooking.studentUid);
@@ -7509,6 +7570,7 @@ async function reconcileStudentBalances() {
 
             const booking = bookingSnap.data() || {};
             if (!shouldConsumeLesson(booking, Date.now(), ledgerSnap.exists)) return;
+            const lateCancellation = isChargeableLateCancellation(booking, STUDENT_CHANGE_CUTOFF_MS);
 
             const student = studentSnap.data() || {};
             const studentAccounting = studentAccountingSnap.exists ? (studentAccountingSnap.data() || {}) : {};
@@ -7544,8 +7606,8 @@ async function reconcileStudentBalances() {
                 id: ledgerRef.id,
                 at: consumedAt,
                 amount: -lessonPrice,
-                type: isFreeTrial ? "trial" : "charge",
-                description: isFreeTrial ? "First free lesson" : `Lesson deduction: ${new Date(booking.slot).toLocaleString()}`,
+                type: isFreeTrial ? "trial" : (lateCancellation ? "late-cancel" : "charge"),
+                description: isFreeTrial ? "First free lesson" : (lateCancellation ? `Late cancellation deduction: ${new Date(booking.slot).toLocaleString()}` : `Lesson deduction: ${new Date(booking.slot).toLocaleString()}`),
                 newBalance: nextBalance,
                 bookingId: doc.id,
                 packageId: packageEntitlement?.packageId || null,
@@ -7588,13 +7650,13 @@ async function reconcileStudentBalances() {
                 lessonConsumed: true,
                 consumedAt,
                 balanceChargedAt: consumedAt,
-                chargeReason: isFreeTrial ? "free-trial" : "lesson",
+                chargeReason: isFreeTrial ? "free-trial" : (lateCancellation ? "late-cancel" : "lesson"),
                 balanceTransactionId: ledgerRef.id,
                 reservationState: "consumed",
                 updatedAt: consumedAt,
                 history: window.firebase.firestore.FieldValue.arrayUnion({
                     at: consumedAt,
-                    action: "lesson-consumed",
+                    action: lateCancellation ? "late-cancellation-consumed" : "lesson-consumed",
                     by: "teacher",
                 }),
             }, { merge: true });

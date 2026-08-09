@@ -55,16 +55,33 @@ export function isLessonHistorical(booking = {}, now = Date.now()) {
     return getLessonEndAt(booking) <= Number(now);
 }
 
-export function shouldConsumeLesson(booking = {}, now = Date.now(), ledgerExists = false) {
+export function isChargeableLateCancellation(booking = {}, cutoffMs = 12 * 60 * 60 * 1000) {
     const status = String(booking.status || "booked").toLowerCase();
+    const canceledBy = String(booking.canceledBy || "").toLowerCase();
+    const canceledAt = Number(booking.canceledAt || 0);
+    const slot = Number(booking.slot || 0);
     return Boolean(
         booking.studentUid &&
-        status !== "canceled" &&
+        booking.isFreeTrial !== true &&
+        status === "canceled" &&
+        canceledBy === "student" &&
+        canceledAt > 0 &&
+        slot > 0 &&
+        slot - canceledAt < Number(cutoffMs)
+    );
+}
+
+export function shouldConsumeLesson(booking = {}, now = Date.now(), ledgerExists = false) {
+    const status = String(booking.status || "booked").toLowerCase();
+    const lateCancellation = isChargeableLateCancellation(booking);
+    return Boolean(
+        booking.studentUid &&
+        (status !== "canceled" || lateCancellation) &&
         booking.lessonConsumed !== true &&
         !booking.balanceChargedAt &&
         booking.balanceCharged !== true &&
         !ledgerExists &&
-        getLessonEndAt(booking) <= now
+        (lateCancellation || getLessonEndAt(booking) <= now)
     );
 }
 
