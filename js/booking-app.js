@@ -1499,17 +1499,22 @@ function startTeacherCalendarAutoRefresh() {
         refreshTeacherCalendarData({ force }).catch((error) => console.warn("Automatic teacher calendar refresh failed.", error));
     };
     state.teacherCalendarRefreshTimer = window.setInterval(() => refreshIfVisible(true), GOOGLE_BUSY_REFRESH_MS);
+    let receivedInitialBookingSnapshot = false;
     state.teacherBookingsUnsubscribe = window.db.collection("bookings")
         .where("slot", ">=", Date.now() - 4 * 60 * 60 * 1000)
         .orderBy("slot")
         .limit(150)
-        .onSnapshot(() => {
+        .onSnapshot((snapshot) => {
+        const hasCanceledBookingChange = receivedInitialBookingSnapshot && snapshot.docChanges().some((change) => (
+            change.type === "modified" && String(change.doc.data()?.status || "").toLowerCase() === "canceled"
+        ));
+        receivedInitialBookingSnapshot = true;
         if (state.teacherBookingsRefreshTimer) window.clearTimeout(state.teacherBookingsRefreshTimer);
         state.teacherBookingsRefreshTimer = window.setTimeout(() => refreshIfVisible(false), 400);
         if (state.teacherStudentsRefreshTimer) window.clearTimeout(state.teacherStudentsRefreshTimer);
         // Do not reconcile from a booking snapshot. Reconciliation writes to
         // bookings and would emit another snapshot, creating a quota-heavy loop.
-        if (state.activeTeacherTab === "tab-students" && Date.now() - state.teacherStudentsLastRefreshAt >= 30000) {
+        if (state.activeTeacherTab === "tab-students" && (hasCanceledBookingChange || Date.now() - state.teacherStudentsLastRefreshAt >= 30000)) {
             state.teacherStudentsRefreshTimer = window.setTimeout(() => {
                 refreshTeacherStudents().catch((error) => console.warn("Could not refresh student balances after a booking change.", error));
             }, 650);
@@ -6941,11 +6946,21 @@ async function refreshTeacherStudents() {
         const accountingByStudent = new Map();
         accountingSnap.forEach((doc) => accountingByStudent.set(doc.id, doc.data() || {}));
         const reservedByStudent = new Map();
+        const pendingLateCancellationByStudent = new Map();
+        const futureBookingById = new Map();
+        futureBookingsSnap.forEach((doc) => futureBookingById.set(doc.id, doc.data() || {}));
         const claimedBookingIds = new Set();
         creditClaimsSnap.forEach((doc) => {
             const claim = doc.data() || {};
             if (!claim.studentUid || claim.state !== "reserved") return;
             if (claim.bookingId) claimedBookingIds.add(claim.bookingId);
+            const linkedBooking = claim.bookingId ? futureBookingById.get(claim.bookingId) : null;
+            if (linkedBooking && String(linkedBooking.status || "booked").toLowerCase() === "canceled") {
+                if (isChargeableLateCancellation(linkedBooking, STUDENT_CHANGE_CUTOFF_MS) && linkedBooking.lessonConsumed !== true && !linkedBooking.balanceChargedAt) {
+                    pendingLateCancellationByStudent.set(claim.studentUid, Number(pendingLateCancellationByStudent.get(claim.studentUid) || 0) + 1);
+                }
+                return;
+            }
             reservedByStudent.set(claim.studentUid, Number(reservedByStudent.get(claim.studentUid) || 0) + 1);
         });
         // Compatibility for teacher-created bookings saved before teacher
@@ -6961,9 +6976,18 @@ async function refreshTeacherStudents() {
         snap.forEach((doc) => {
             const profile = doc.data() || {};
             const accounting = accountingByStudent.get(doc.id) || {};
+            const storedLessonCredits = Math.max(0, Math.floor(Number(accounting.lessonCredits ?? profile.lessonCredits ?? 0)));
+            const pendingLateCancellations = Number(pendingLateCancellationByStudent.get(doc.id) || 0);
             const hasLegacyFinance = ["balance", "lessonPrice", "totalPaid", "transactions"].some((key) => Object.prototype.hasOwnProperty.call(profile, key));
             if (hasLegacyFinance) migrations.push({ id: doc.id, profile, accounting });
-            students.push({ id: doc.id, ...profile, ...accounting, reservedLessons: Number(reservedByStudent.get(doc.id) || 0) });
+            students.push({
+                id: doc.id,
+                ...profile,
+                ...accounting,
+                lessonCredits: storedLessonCredits,
+                displayLessonCredits: Math.max(0, storedLessonCredits - pendingLateCancellations),
+                reservedLessons: Number(reservedByStudent.get(doc.id) || 0),
+            });
         });
         if (!migrationAlreadyComplete) {
             if (migrations.length) await migrateLegacyStudentAccounting(migrations);
@@ -6985,7 +7009,7 @@ async function refreshTeacherStudents() {
             state.studentCache.set(student.id, student);
             const balance = formatMoney(student.balance);
             const lessonPrice = toMoneyValue(student.customLessonPrice);
-            const remainingLessons = Math.max(0, Math.floor(Number(student.lessonCredits || 0)));
+            const remainingLessons = Math.max(0, Math.floor(Number(student.displayLessonCredits ?? student.lessonCredits ?? 0)));
             const reservedLessons = Math.max(0, Math.floor(Number(student.reservedLessons || 0)));
             const availableLessons = student.allowOverdraft === true ? "Unlimited" : Math.max(0, remainingLessons - reservedLessons);
             const courseAccess = student.courseAccess === true;
