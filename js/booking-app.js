@@ -121,6 +121,7 @@ const state = {
     teacherBookingsUnsubscribe: null,
     teacherBookingsRefreshTimer: null,
     teacherStudentsRefreshTimer: null,
+    teacherStudentsLastRefreshAt: 0,
     teacherLastCalendarRefreshAt: 0,
     balanceReconcileTimer: null,
     studentProfileUnsubscribe: null,
@@ -1508,9 +1509,11 @@ function startTeacherCalendarAutoRefresh() {
         if (state.teacherStudentsRefreshTimer) window.clearTimeout(state.teacherStudentsRefreshTimer);
         // Do not reconcile from a booking snapshot. Reconciliation writes to
         // bookings and would emit another snapshot, creating a quota-heavy loop.
-        state.teacherStudentsRefreshTimer = window.setTimeout(() => {
-            refreshTeacherStudents().catch((error) => console.warn("Could not refresh student balances after a booking change.", error));
-        }, 650);
+        if (state.activeTeacherTab === "tab-students" && Date.now() - state.teacherStudentsLastRefreshAt >= 30000) {
+            state.teacherStudentsRefreshTimer = window.setTimeout(() => {
+                refreshTeacherStudents().catch((error) => console.warn("Could not refresh student balances after a booking change.", error));
+            }, 650);
+        }
         }, (error) => console.warn("Teacher booking listener failed.", error));
     refreshIfVisible(true);
 }
@@ -5509,7 +5512,7 @@ async function refreshTeacherDashboard() {
     await refreshTeacherBookings({ reconcile: false });
     renderTeacherWeekCalendar();
     const secondaryLoads = [
-        refreshTeacherStudents(),
+        state.activeTeacherTab === "tab-students" ? refreshTeacherStudents() : Promise.resolve(),
         refreshGoogleCalendarStatus(),
         renderBookingCalendar(),
         reconcileStudentBalances().then(async (result) => {
@@ -5554,6 +5557,9 @@ function switchTeacherTab(tabId) {
     state.activeTeacherTab = tabId;
     if (tabId === "tab-schedule") {
         refreshTeacherCalendarData({ force: true }).catch((error) => console.warn("Could not refresh teacher schedule.", error));
+    }
+    if (tabId === "tab-students" && Date.now() - state.teacherStudentsLastRefreshAt >= 30000) {
+        refreshTeacherStudents().catch((error) => console.warn("Could not refresh students.", error));
     }
     if (tabId === "tab-reviews" && !state.teacherLessonFeedbackLoaded) {
         refreshTeacherLessonFeedback().catch((error) => {
@@ -6411,7 +6417,7 @@ function startBalanceReconcileAutoRefresh() {
             })
             .catch(console.error)
             .finally(() => { state.balanceReconcileInFlight = null; });
-    }, 30 * 60 * 1000);
+    }, 2 * 60 * 60 * 1000);
 }
 
 function stopBalanceReconcileAutoRefresh() {
@@ -6906,6 +6912,7 @@ async function refreshTeacherStudents() {
     els.teacherStudentsList.innerHTML = "<div class=\"small-note\">Loading students...</div>";
     state.studentCache.clear();
     try {
+        state.teacherStudentsLastRefreshAt = Date.now();
         const privatePricingSnap = await window.db.collection("teacherAccountingSettings").doc("primary").get();
         const storedDefaultPrice = privatePricingSnap.exists ? toMoneyValue(privatePricingSnap.data()?.defaultLessonPrice) : 0;
         if (storedDefaultPrice > 0) state.profileSettings.rateText = `$${storedDefaultPrice}`;
@@ -7390,20 +7397,20 @@ async function loadBalanceChargeCandidates(now) {
     };
 
     try {
-        const recentPastCutoff = now - 366 * 24 * 60 * 60 * 1000;
+        const recentPastCutoff = now - 14 * 24 * 60 * 60 * 1000;
         const pastSnap = await window.db
             .collection("bookings")
             .where("slot", ">=", recentPastCutoff)
             .where("slot", "<=", now)
             .orderBy("slot", "desc")
-            .limit(500)
+            .limit(100)
             .get();
         addDocs(pastSnap);
     } catch {
         const fallbackSnap = await window.db
             .collection("bookings")
             .orderBy("slot", "desc")
-            .limit(500)
+            .limit(100)
             .get();
         addDocs(fallbackSnap);
     }
@@ -7412,14 +7419,14 @@ async function loadBalanceChargeCandidates(now) {
         const canceledSnap = await window.db.collection("bookings")
             .where("status", "==", "canceled")
             .orderBy("slot", "desc")
-            .limit(200)
+            .limit(50)
             .get();
         addDocs(canceledSnap);
     } catch {
         try {
             const canceledFallback = await window.db.collection("bookings")
                 .where("status", "==", "canceled")
-                .limit(200)
+                .limit(50)
                 .get();
             addDocs(canceledFallback);
         } catch {
@@ -7538,6 +7545,8 @@ async function reconcileStudentBalances() {
         const studentAccountingRef = window.db.collection("studentAccounting").doc(initialBooking.studentUid);
         const bookingAccountingRef = window.db.collection("bookingAccounting").doc(doc.id);
         const ledgerRef = window.db.collection("lessonBalanceTransactions").doc(`consume_${doc.id}`);
+        const existingLedger = await ledgerRef.get();
+        if (existingLedger.exists) continue;
         let claimRefs = [];
         if (initialBooking.reservationClaimId) {
             claimRefs = [window.db.collection("lessonCreditClaims").doc(initialBooking.reservationClaimId)];

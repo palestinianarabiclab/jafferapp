@@ -78,3 +78,13 @@ test("booking snapshots do not trigger balance reconciliation loops", () => {
     assert.doesNotMatch(app, /teacherStudentsRefreshTimer = window\.setTimeout\(async \(\) => \{[\s\S]{0,300}reconcileStudentBalances/);
     assert.doesNotMatch(app, /slotClaimIds\.forEach\(\(claimId\) => transaction\.delete/);
 });
+test("Calendar worker avoids unchanged writes and limits routine scans", () => {
+    assert.match(worker, /return 'unchanged'/);
+    assert.doesNotMatch(worker, /if \(oldSlot === newSlot[\s\S]{0,220}firestoreIamPatch_/);
+    assert.match(worker, /everyMinutes\(10\)/);
+    assert.match(worker, /const horizon = Date\.now\(\) \+ 60 \* 24/);
+});
+test("balance reconciliation is bounded and skips existing ledgers before package reads", () => {
+    assert.match(app, /recentPastCutoff = now - 14 \* 24/);
+    assert.match(app, /const existingLedger = await ledgerRef\.get\(\);\s*if \(existingLedger\.exists\) continue/);
+});

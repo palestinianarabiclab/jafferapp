@@ -678,16 +678,34 @@ function firestoreIamCreateClaim_(config, claimId, values) {
 
 function listFirestoreBookingsIam_(config) {
   const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  const result = firestoreIamRequest_(config, ':runQuery', {
+  const horizon = Date.now() + 60 * 24 * 60 * 60 * 1000;
+  const ranged = firestoreIamRequest_(config, ':runQuery', {
     method: 'post', contentType: 'application/json',
     payload: JSON.stringify({ structuredQuery: {
       from: [{ collectionId: 'bookings' }],
-      where: { fieldFilter: { field: { fieldPath: 'slot' }, op: 'GREATER_THAN_OR_EQUAL', value: fsValue_(cutoff) } },
+      where: { compositeFilter: { op: 'AND', filters: [
+        { fieldFilter: { field: { fieldPath: 'slot' }, op: 'GREATER_THAN_OR_EQUAL', value: fsValue_(cutoff) } },
+        { fieldFilter: { field: { fieldPath: 'slot' }, op: 'LESS_THAN_OR_EQUAL', value: fsValue_(horizon) } }
+      ] } },
       orderBy: [{ field: { fieldPath: 'slot' }, direction: 'ASCENDING' }],
-      limit: 1000
+      limit: 500
     } })
   });
-  return (result || []).map(function (row) { return row.document; }).filter(Boolean);
+  const pending = firestoreIamRequest_(config, ':runQuery', {
+    method: 'post', contentType: 'application/json',
+    payload: JSON.stringify({ structuredQuery: {
+      from: [{ collectionId: 'bookings' }],
+      where: { fieldFilter: { field: { fieldPath: 'calendarSynced' }, op: 'EQUAL', value: fsValue_(false) } },
+      limit: 100
+    } })
+  });
+  const byId = {};
+  [ranged, pending].forEach(function (rows) {
+    (rows || []).forEach(function (row) {
+      if (row.document) byId[bookingDocId_(row.document)] = row.document;
+    });
+  });
+  return Object.keys(byId).map(function (id) { return byId[id]; });
 }
 
 const NOTIFICATION_MAX_ATTEMPTS_ = 8;
@@ -1032,7 +1050,6 @@ function reconcileExternalCalendarChange_(config, bookingId, booking, event) {
   let meetingUrl = '';
   try { meetingUrl = event.getHangoutLink() || ''; } catch (err) {}
   if (oldSlot === newSlot && oldDuration === newDuration && meetingUrl === fsString_(booking, 'meetingUrl')) {
-    firestoreIamPatch_(config, 'bookings', bookingId, { calendarLastCheckedAt: Date.now() });
     return 'unchanged';
   }
   const oldClaims = fsStringArray_(booking, 'slotClaimIds');
@@ -1185,10 +1202,7 @@ function runCalendarSyncWorker() {
           summary.reconciled += 1;
           return;
         }
-        if (lessonEnd <= Date.now()) {
-          firestoreIamPatch_(config, 'bookings', bookingId, { calendarLastCheckedAt: Date.now() });
-          return;
-        }
+        if (lessonEnd <= Date.now()) return;
         const mappedEvents = platformEventsByBooking[bookingId] || [];
         if (mappedEvents.length > 1) throw new Error('Duplicate Calendar events detected for Booking ID ' + bookingId + '.');
         const event = mappedEvents[0] || null;
@@ -1238,8 +1252,8 @@ function installCalendarSyncTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (trigger) {
     if (trigger.getHandlerFunction() === 'runCalendarSyncWorker') ScriptApp.deleteTrigger(trigger);
   });
-  ScriptApp.newTrigger('runCalendarSyncWorker').timeBased().everyMinutes(5).create();
-  return { success: true, triggerInstalled: true, message: 'Automatic Calendar/Firestore sync installed (every 5 minutes).' };
+  ScriptApp.newTrigger('runCalendarSyncWorker').timeBased().everyMinutes(10).create();
+  return { success: true, triggerInstalled: true, message: 'Automatic Calendar/Firestore sync installed (every 10 minutes).' };
 }
 
 /**
