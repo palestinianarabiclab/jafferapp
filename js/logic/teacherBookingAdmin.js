@@ -26,13 +26,27 @@ export async function renderTeacherBookings({
     bookingCache,
     escapeHtml,
     formatSlotTime,
+    bookingSnapshot = null,
 }) {
     if (!teacherBookingList) return bookingCache;
     teacherBookingList.innerHTML = "<div class=\"small-note\">Loading bookings...</div>";
-    bookingCache.clear();
     try {
         const managementStart = Date.now() - 4 * 60 * 60 * 1000;
         const calendarHistoryStart = Date.now() - 60 * 24 * 60 * 60 * 1000;
+        const itemsById = new Map();
+        const collectBooking = (doc) => {
+            const data = doc.data();
+            if (!data || !data.slot || data.slot < calendarHistoryStart) return;
+            itemsById.set(doc.id, { id: doc.id, ...data });
+        };
+        if (bookingSnapshot) {
+            bookingCache.forEach((booking, id) => {
+                if (Number(booking.slot || 0) >= calendarHistoryStart && Number(booking.slot || 0) < managementStart) {
+                    itemsById.set(id, booking);
+                }
+            });
+            bookingSnapshot.forEach(collectBooking);
+        } else {
         let upcomingSnap;
         let historySnap;
         try {
@@ -67,16 +81,11 @@ export async function renderTeacherBookings({
             upcomingSnap = fallbackSnap;
             historySnap = null;
         }
-        const itemsById = new Map();
-        const collectBooking = (doc) => {
-            const data = doc.data();
-            if (!data || !data.slot) return;
-            if (data.slot < calendarHistoryStart) return;
-            itemsById.set(doc.id, { id: doc.id, ...data });
-        };
         upcomingSnap?.forEach(collectBooking);
         historySnap?.forEach(collectBooking);
+        }
         const items = Array.from(itemsById.values()).sort((a, b) => Number(a.slot) - Number(b.slot));
+        bookingCache.clear();
         items.forEach((booking) => {
             bookingCache.set(booking.id, booking);
         });

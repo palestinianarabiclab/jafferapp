@@ -72,7 +72,8 @@ test("canceled student bookings allow safe notification follow-up and refresh li
     assert.match(rules, /request\.resource\.data\.status == "canceled"/);
     assert.match(rules, /'calendarDeletePending'/);
     assert.match(rules, /'teacherNotificationStatus'/);
-    assert.match(app, /Promise\.all\(\[loadStudentBookings\(\), renderBookingCalendar\(\)\]\)/);
+    assert.match(app, /loadStudentBookings\(\{ recentSnapshot: snapshot \}\)/);
+    assert.match(app, /studentBookingsFingerprint/);
 });
 test("booking snapshots do not trigger balance reconciliation loops", () => {
     assert.doesNotMatch(app, /teacherStudentsRefreshTimer = window\.setTimeout\(async \(\) => \{[\s\S]{0,300}reconcileStudentBalances/);
@@ -83,6 +84,19 @@ test("Calendar worker avoids unchanged writes and limits routine scans", () => {
     assert.doesNotMatch(worker, /if \(oldSlot === newSlot[\s\S]{0,220}firestoreIamPatch_/);
     assert.match(worker, /everyMinutes\(10\)/);
     assert.match(worker, /const horizon = Date\.now\(\) \+ 60 \* 24/);
+});
+test("public and student listeners are bounded to reduce Firestore reads", () => {
+    assert.match(app, /GOOGLE_BUSY_REFRESH_MS = 10 \* 60 \* 1000/);
+    assert.match(app, /loadCloudReviews\(window\.db, undefined, \{ limit: 6 \}\)/);
+    assert.match(app, /where\("slot", ">=", Date\.now\(\) - 60 \* 24 \* 60 \* 60 \* 1000\)/);
+    assert.match(app, /\.limit\(40\)[\s\S]{0,80}\.onSnapshot/);
+    assert.doesNotMatch(app, /collection\("lessonFeedbackSummary"\)[\s\S]{0,100}\.onSnapshot/);
+});
+test("Calendar month two is scanned daily and the retired board does not use Firestore", () => {
+    assert.match(worker, /includeSecondMonth \? 61 : 31/);
+    assert.match(worker, /CALENDAR_SECOND_MONTH_LAST_SCAN_AT/);
+    assert.match(app, /async function saveWhiteboardToCloud\(\) \{[\s\S]{0,180}return;/);
+    assert.doesNotMatch(app, /function listenWhiteboardFromCloud\(bookingId\) \{[\s\S]{0,220}\.onSnapshot/);
 });
 test("balance reconciliation is bounded and skips existing ledgers before package reads", () => {
     assert.match(app, /recentPastCutoff = now - 14 \* 24/);

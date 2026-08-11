@@ -780,12 +780,13 @@ export function saveLocalReviews(storageKey, reviews) {
     } catch {}
 }
 
-export async function loadCloudReviews(db, defaultReviews) {
+export async function loadCloudReviews(db, defaultReviews, { limit = 100 } = {}) {
     try {
-        const snap = await db
-            .collection("reviews")
-            .limit(100)
-            .get();
+        let query = db.collection("reviews").orderBy("createdAt", "desc");
+        if (Number.isFinite(Number(limit)) && Number(limit) > 0) {
+            query = query.limit(Math.trunc(Number(limit)));
+        }
+        const snap = await query.get();
         if (!snap.empty) {
             const items = [];
             snap.forEach((doc) => {

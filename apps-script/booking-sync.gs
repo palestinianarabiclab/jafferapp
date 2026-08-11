@@ -1120,7 +1120,11 @@ function runCalendarSyncWorker() {
     const bookings = listFirestoreBookingsIam_(config);
     const cal = CalendarApp.getCalendarById(config.primaryCalendarId);
     const scanStart = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const scanEnd = new Date(Date.now() + 367 * 24 * 60 * 60 * 1000);
+    const workerProps = PropertiesService.getScriptProperties();
+    const secondMonthLastScanAt = Number(workerProps.getProperty('CALENDAR_SECOND_MONTH_LAST_SCAN_AT') || 0);
+    const includeSecondMonth = Date.now() - secondMonthLastScanAt >= 24 * 60 * 60 * 1000;
+    const scanEnd = new Date(Date.now() + (includeSecondMonth ? 61 : 31) * 24 * 60 * 60 * 1000);
+    if (includeSecondMonth) workerProps.setProperty('CALENDAR_SECOND_MONTH_LAST_SCAN_AT', String(Date.now()));
     const platformEventsByBooking = {};
     cal.getEvents(scanStart, scanEnd).forEach(function (event) {
       const details = parseEventDetails_(event, config);
@@ -1206,6 +1210,9 @@ function runCalendarSyncWorker() {
         const mappedEvents = platformEventsByBooking[bookingId] || [];
         if (mappedEvents.length > 1) throw new Error('Duplicate Calendar events detected for Booking ID ' + bookingId + '.');
         const event = mappedEvents[0] || null;
+        // Month one is reconciled every worker run. Month two is reconciled once
+        // daily so distant lessons do not trigger the same Calendar scan all day.
+        if (!event && fsNumber_(booking, 'slot') >= scanEnd.getTime()) return;
         if (!event) {
           const canceledAt = Date.now();
           releaseBookingClaimsIam_(config, booking);

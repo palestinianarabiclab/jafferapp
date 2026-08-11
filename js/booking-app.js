@@ -19,7 +19,7 @@ import {
     rescheduleBooking,
     resizeBookingDuration,
     clearAllBookings,
-} from "./logic/teacherBookingAdmin.js?v=20260808-phase3-notifications-v1";
+} from "./logic/teacherBookingAdmin.js?v=20260811-resource-optimization-v1";
 import {
     bootstrapTeacherAccess,
     resolveUserRole,
@@ -66,11 +66,11 @@ import {
     loadCloudReviews,
     addReviewToCloud,
     deleteReviewFromCloud,
-} from "./logic/profileAndReviewsStore.js";
+} from "./logic/profileAndReviewsStore.js?v=20260811-resource-optimization-v1";
 
 const DAY_KEYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const DEFAULT_TIMEZONE = "Africa/Cairo";
-const GOOGLE_BUSY_REFRESH_MS = 5 * 60 * 1000;
+const GOOGLE_BUSY_REFRESH_MS = 10 * 60 * 1000;
 const STUDENT_CHANGE_CUTOFF_MS = 12 * 60 * 60 * 1000;
 const BUSY_BLOCKS_CACHE_MS = 60000;
 const LESSON_FEEDBACK_BASELINE = {
@@ -90,6 +90,9 @@ const state = {
     reviews: loadLocalReviews("teacher_reviews_v1", createInitialReviews()),
     reviewsSortMode: "newest",
     reviewsExpanded: false,
+    reviewsLoadedAll: false,
+    reviewsMayHaveMore: true,
+    reviewsLoadInFlight: null,
     selectedPackage: null,
     reservedPaidLessons: 0,
     pendingLateCancellationCount: 0,
@@ -112,6 +115,10 @@ const state = {
     teacherCalendarTouch: null,
     studentBookingsUnsubscribe: null,
     studentBookingsRefreshTimer: null,
+    studentBookingsFingerprint: "",
+    studentBookingRows: [],
+    studentHistoryLoaded: false,
+    studentBookingsUid: "",
     teacherRevenueTotal: 0,
     studentCache: new Map(),
     googleCalendarMessage: "",
@@ -1510,7 +1517,12 @@ function startTeacherCalendarAutoRefresh() {
         ));
         receivedInitialBookingSnapshot = true;
         if (state.teacherBookingsRefreshTimer) window.clearTimeout(state.teacherBookingsRefreshTimer);
-        state.teacherBookingsRefreshTimer = window.setTimeout(() => refreshIfVisible(false), 400);
+        state.teacherBookingsRefreshTimer = window.setTimeout(() => {
+            const teacherScreen = document.getElementById("teacher-screen");
+            if (document.hidden || !teacherScreen?.classList.contains("app-screen--active")) return;
+            refreshTeacherBookings({ reconcile: false, bookingSnapshot: snapshot })
+                .catch((error) => console.warn("Could not render updated teacher bookings.", error));
+        }, 400);
         if (state.teacherStudentsRefreshTimer) window.clearTimeout(state.teacherStudentsRefreshTimer);
         // Do not reconcile from a booking snapshot. Reconciliation writes to
         // bookings and would emit another snapshot, creating a quota-heavy loop.
@@ -2107,7 +2119,7 @@ function renderUpcomingLessonBanner(bookings) {
     upcomingBannerInterval = setInterval(updateBannerContent, 30000);
 }
 
-async function loadStudentBookings() {
+async function loadStudentBookings({ includeHistory = state.studentHistoryLoaded, recentSnapshot = null } = {}) {
     if (!els.bookingStatusList) return;
     els.bookingStatusList.innerHTML = "";
     if (!state.currentUser || state.currentRole !== "student") {
@@ -2117,18 +2129,23 @@ async function loadStudentBookings() {
     }
     try {
         const email = state.currentUser.email || "";
-        let snapUid = null;
+        const recentCutoff = Date.now() - 60 * 24 * 60 * 60 * 1000;
+        let snapUid = recentSnapshot;
         let snapEmail = null;
 
         // 1. Query bookings by studentUid
-        try {
-            snapUid = await window.db
-                .collection("bookings")
-                .where("studentUid", "==", state.currentUser.uid)
-                .limit(100)
-                .get();
-        } catch (e) {
-            console.warn("Failed querying bookings by studentUid:", e);
+        if (!snapUid) {
+            try {
+                snapUid = await window.db
+                    .collection("bookings")
+                    .where("studentUid", "==", state.currentUser.uid)
+                    .where("slot", ">=", recentCutoff)
+                    .orderBy("slot", "desc")
+                    .limit(40)
+                    .get();
+            } catch (e) {
+                console.warn("Failed querying recent bookings by studentUid:", e);
+            }
         }
 
         // 2. Query bookings by email
@@ -2137,14 +2154,16 @@ async function loadStudentBookings() {
                 snapEmail = await window.db
                     .collection("bookings")
                     .where("email", "==", email)
-                    .limit(100)
+                    .where("slot", ">=", recentCutoff)
+                    .orderBy("slot", "desc")
+                    .limit(40)
                     .get();
             } catch (e) {
                 console.warn("Failed querying bookings by email:", e);
             }
         }
 
-        const rowsMap = new Map();
+        const rowsMap = new Map(includeHistory ? state.studentBookingRows.map((row) => [row.id, row]) : []);
 
         if (snapUid) {
             snapUid.forEach((doc) => {
@@ -2161,8 +2180,25 @@ async function loadStudentBookings() {
             });
         }
 
+        if (includeHistory && !state.studentHistoryLoaded) {
+            let historySnap = null;
+            try {
+                historySnap = await window.db.collection("bookings")
+                    .where("studentUid", "==", state.currentUser.uid)
+                    .where("slot", "<", recentCutoff)
+                    .orderBy("slot", "desc")
+                    .limit(160)
+                    .get();
+            } catch (error) {
+                console.warn("Could not load older student booking history.", error);
+            }
+            historySnap?.forEach((doc) => rowsMap.set(doc.id, { id: doc.id, ...(doc.data() || {}) }));
+            state.studentHistoryLoaded = true;
+        }
+
         const rows = Array.from(rowsMap.values());
         rows.sort((a, b) => (b.slot || 0) - (a.slot || 0));
+        state.studentBookingRows = rows;
         state.reservedPaidLessons = rows.filter(isUnchargedPaidBooking).length;
         updateStudentBalanceUi();
         await syncLessonFeedbackPrompt(rows);
@@ -2341,8 +2377,14 @@ async function loadStudentBookings() {
             }
         };
 
-        const toggleCompleted = () => {
+        const toggleCompleted = async () => {
             if (compContent.style.display === "none") {
+                if (!state.studentHistoryLoaded) {
+                    compToggleBtn.disabled = true;
+                    compToggleBtn.textContent = "Loading...";
+                    await loadStudentBookings({ includeHistory: true });
+                    return;
+                }
                 compContent.style.display = "block";
                 compToggleBtn.textContent = "Hide ▲";
             } else {
@@ -2363,12 +2405,12 @@ async function loadStudentBookings() {
 
         document.getElementById("completedSectionHeader")?.addEventListener("click", (e) => {
             if (!e.target.closest("button") && !e.target.closest(".booking-item__actions")) {
-                toggleCompleted();
+                toggleCompleted().catch(console.error);
             }
         });
         compToggleBtn?.addEventListener("click", (e) => {
             e.stopPropagation();
-            toggleCompleted();
+            toggleCompleted().catch(console.error);
         });
 
     } catch (error) {
@@ -2536,13 +2578,12 @@ async function loadPublicLessonFeedbackSummary() {
         els.lessonRatingSummaryCount.textContent = `Based on ${studentCount} anonymous student review${studentCount === 1 ? "" : "s"}`;
     };
     renderSummary();
-    state.lessonFeedbackSummaryUnsubscribe = window.db
-        .collection("lessonFeedbackSummary")
-        .doc("public")
-        .onSnapshot(
-            (doc) => renderSummary(doc.exists ? (doc.data() || {}) : {}),
-            (error) => console.warn("Could not load public lesson feedback summary.", error)
-        );
+    try {
+        const doc = await window.db.collection("lessonFeedbackSummary").doc("public").get();
+        renderSummary(doc.exists ? (doc.data() || {}) : {});
+    } catch (error) {
+        console.warn("Could not load public lesson feedback summary.", error);
+    }
 }
 
 async function refreshTeacherLessonFeedback(existingSnapshot = null) {
@@ -2597,17 +2638,8 @@ function stopTeacherLessonFeedbackListener() {
 
 function startTeacherLessonFeedbackListener() {
     stopTeacherLessonFeedbackListener();
-    if (!window.db || !state.teacherUser || state.teacherRole !== "teacher") return;
-    state.teacherLessonFeedbackUnsubscribe = window.db
-        .collection("lessonFeedback")
-        .orderBy("createdAt", "desc")
-        .limit(100)
-        .onSnapshot((snapshot) => {
-            if (state.teacherLessonFeedbackRefreshTimer) window.clearTimeout(state.teacherLessonFeedbackRefreshTimer);
-            state.teacherLessonFeedbackRefreshTimer = window.setTimeout(() => {
-                refreshTeacherLessonFeedback(snapshot).catch((error) => console.warn("Could not refresh lesson feedback.", error));
-            }, 250);
-        }, (error) => console.warn("Lesson feedback listener failed.", error));
+    // Feedback is intentionally loaded once when the teacher opens Reviews.
+    // It does not need a permanent listener on every teacher-dashboard tab.
 }
 
 function stopStudentBookingsListener() {
@@ -2615,6 +2647,7 @@ function stopStudentBookingsListener() {
         state.studentBookingsUnsubscribe();
     }
     state.studentBookingsUnsubscribe = null;
+    state.studentBookingsFingerprint = "";
     if (state.studentBookingsRefreshTimer) window.clearTimeout(state.studentBookingsRefreshTimer);
     state.studentBookingsRefreshTimer = null;
 }
@@ -2622,10 +2655,24 @@ function stopStudentBookingsListener() {
 function startStudentBookingsListener() {
     stopStudentBookingsListener();
     if (!window.db || !state.currentUser || state.currentRole !== "student") return;
+    if (state.studentBookingsUid !== state.currentUser.uid) {
+        state.studentBookingsUid = state.currentUser.uid;
+        state.studentBookingRows = [];
+        state.studentHistoryLoaded = false;
+    }
     state.studentBookingsUnsubscribe = window.db.collection("bookings")
         .where("studentUid", "==", state.currentUser.uid)
-        .limit(200)
+        .where("slot", ">=", Date.now() - 60 * 24 * 60 * 60 * 1000)
+        .orderBy("slot", "desc")
+        .limit(40)
         .onSnapshot((snapshot) => {
+            const fingerprint = snapshot.docs.map((doc) => {
+                const booking = doc.data() || {};
+                return [doc.id, booking.status, booking.slot, booking.durationMinutes, booking.meetingUrl,
+                    booking.studentNotice, booking.consumptionState, booking.reservationState].join("|");
+            }).sort().join("::");
+            if (fingerprint === state.studentBookingsFingerprint) return;
+            state.studentBookingsFingerprint = fingerprint;
             let reserved = 0;
             let pendingLateCancellations = 0;
             snapshot.forEach((doc) => {
@@ -2641,7 +2688,7 @@ function startStudentBookingsListener() {
             if (state.studentBookingsRefreshTimer) window.clearTimeout(state.studentBookingsRefreshTimer);
             state.studentBookingsRefreshTimer = window.setTimeout(async () => {
                 try {
-                    await Promise.all([loadStudentBookings(), renderBookingCalendar()]);
+                    await Promise.all([loadStudentBookings({ recentSnapshot: snapshot }), renderBookingCalendar()]);
                 } catch (error) {
                     console.warn("Could not refresh student bookings after a live change.", error);
                 }
@@ -3863,33 +3910,13 @@ function clearWhiteboard() {
 }
 
 async function saveWhiteboardToCloud() {
-    if (!wbCanvas || !currentClassroomBooking || !currentClassroomBooking.id || !window.db) return;
-    try {
-        const dataUrl = wbCanvas.toDataURL("image/png");
-        await window.db.collection("bookings").doc(currentClassroomBooking.id).set({
-            boardDataUrl: dataUrl,
-            boardUpdatedAt: Date.now()
-        }, { merge: true });
-    } catch (e) {
-        console.error("Failed to sync whiteboard:", e);
-    }
+    // The built-in board is retired; lessons open directly in Google Meet.
+    return;
 }
 
 function listenWhiteboardFromCloud(bookingId) {
-    if (!window.db || !bookingId) return;
-    if (wbUnsubscribe) wbUnsubscribe();
-
-    wbUnsubscribe = window.db.collection("bookings").doc(bookingId).onSnapshot((doc) => {
-        const data = doc.data();
-        if (data && data.boardDataUrl && wbCtx && wbCanvas) {
-            const img = new Image();
-            img.onload = () => {
-                wbCtx.clearRect(0, 0, wbCanvas.width, wbCanvas.height);
-                wbCtx.drawImage(img, 0, 0, wbCanvas.width, wbCanvas.height);
-            };
-            img.src = data.boardDataUrl;
-        }
-    });
+    // No Firestore listener is created for the retired classroom board.
+    return bookingId;
 }
 
 async function recoverClassroomMeetingUrl(booking) {
@@ -4427,7 +4454,16 @@ function wireStudentActions() {
         renderReviewsUi();
     });
 
-    els.studentReviewsToggleBtn?.addEventListener("click", () => {
+    els.studentReviewsToggleBtn?.addEventListener("click", async () => {
+        if (!state.reviewsExpanded && !state.reviewsLoadedAll) {
+            els.studentReviewsToggleBtn.disabled = true;
+            els.studentReviewsToggleBtn.textContent = "Loading reviews...";
+            try {
+                await ensureAllReviewsLoaded();
+            } finally {
+                els.studentReviewsToggleBtn.disabled = false;
+            }
+        }
         state.reviewsExpanded = !state.reviewsExpanded;
         renderReviewsUi();
         if (!state.reviewsExpanded) {
@@ -5567,6 +5603,7 @@ function switchTeacherTab(tabId) {
         refreshTeacherStudents().catch((error) => console.warn("Could not refresh students.", error));
     }
     if (tabId === "tab-reviews" && !state.teacherLessonFeedbackLoaded) {
+        ensureAllReviewsLoaded().catch((error) => console.warn("Could not load all reviews.", error));
         refreshTeacherLessonFeedback().catch((error) => {
             console.warn("Could not load lesson feedback.", error);
         });
@@ -6088,13 +6125,14 @@ if (typeof window !== "undefined") {
     });
 }
 
-async function refreshTeacherBookings({ reconcile = false } = {}) {
+async function refreshTeacherBookings({ reconcile = false, bookingSnapshot = null } = {}) {
     state.bookingCache = await renderTeacherBookings({
         db: window.db,
         teacherBookingList: els.teacherBookingList,
         bookingCache: state.bookingCache,
         escapeHtml,
         formatSlotTime,
+        bookingSnapshot,
     });
     renderTeacherWeekCalendar();
     updateTeacherOverviewStats();
@@ -6626,6 +6664,26 @@ function getReviewTimestamp(r) {
     return 0;
 }
 
+async function ensureAllReviewsLoaded() {
+    if (state.reviewsLoadedAll || !window.db) return state.reviews;
+    if (state.reviewsLoadInFlight) return state.reviewsLoadInFlight;
+    state.reviewsLoadInFlight = loadCloudReviews(window.db, state.reviews, { limit: 100 })
+        .then((reviews) => {
+            if (Array.isArray(reviews) && reviews.length) {
+                state.reviews = reviews
+                    .filter((review) => !["rev-preply-1", "rev-preply-2", "rev-preply-3"].includes(review.id))
+                    .sort((a, b) => getReviewTimestamp(b) - getReviewTimestamp(a));
+                saveLocalReviews("teacher_reviews_v1", state.reviews);
+            }
+            state.reviewsLoadedAll = true;
+            state.reviewsMayHaveMore = false;
+            renderReviewsUi();
+            return state.reviews;
+        })
+        .finally(() => { state.reviewsLoadInFlight = null; });
+    return state.reviewsLoadInFlight;
+}
+
 function renderReviewsUi() {
     const list = state.reviews || [];
     const count = list.length;
@@ -6702,11 +6760,11 @@ function renderReviewsUi() {
     }
 
     if (els.studentReviewsToggleBtn) {
-        const hasMoreReviews = count > 6;
+        const hasMoreReviews = count > 6 || state.reviewsMayHaveMore;
         els.studentReviewsToggleBtn.hidden = !hasMoreReviews;
         els.studentReviewsToggleBtn.textContent = state.reviewsExpanded
             ? "Show fewer reviews"
-            : `Show all ${count} reviews`;
+            : (state.reviewsLoadedAll ? `Show all ${count} reviews` : "Show more reviews");
         els.studentReviewsToggleBtn.setAttribute("aria-expanded", state.reviewsExpanded ? "true" : "false");
     }
 
@@ -9238,7 +9296,7 @@ async function init() {
         }
     }).catch(console.error);
 
-    loadCloudReviews(window.db).then(async (cloudRevs) => {
+    loadCloudReviews(window.db, undefined, { limit: 6 }).then(async (cloudRevs) => {
         const initialRevs = createInitialReviews();
 
         // Clean and validate reviews
@@ -9274,6 +9332,8 @@ async function init() {
         });
 
         state.reviews = filteredRevs;
+        state.reviewsLoadedAll = !cloudRevs || cloudRevs.length < 6;
+        state.reviewsMayHaveMore = Array.isArray(cloudRevs) && cloudRevs.length === 6;
         saveLocalReviews("teacher_reviews_v1", filteredRevs);
         renderReviewsUi();
     }).catch(console.error);
