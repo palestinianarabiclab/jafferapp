@@ -23,3 +23,15 @@ test("mobile student signup uses a keyboard-safe bottom sheet", () => {
     assert.match(css, /env\(safe-area-inset-bottom\)/);
     assert.match(css, /#studentAuthModal input,[\s\S]*?font-size: 16px/);
 });
+
+test("active students combines registered and uniquely taught students", () => {
+    const start = app.indexOf("function updateTeacherOverviewStats");
+    const end = app.indexOf("function parseProfileCounter", start);
+    const overview = app.slice(start, end);
+    assert.match(overview, /activeStudentsEl\.textContent = getActiveStudentCount\(\)\.toLocaleString\(\)/);
+    assert.doesNotMatch(overview, /Math\.max\(registeredCount, baseStudents/);
+    assert.match(app, /knownStudentKeys/);
+    assert.match(app, /knownPlatformStudentKeys/);
+    assert.match(app, /async function syncPublicStudentCounts/);
+    assert.match(app, /currentRegistered === registeredCount && currentActive === activeCount/);
+});

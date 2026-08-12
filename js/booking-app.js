@@ -120,6 +120,7 @@ const state = {
     studentHistoryLoaded: false,
     studentBookingsUid: "",
     teacherRevenueTotal: 0,
+    teacherCalendarStatistics: {},
     studentCache: new Map(),
     googleCalendarMessage: "",
     googleCalendarConnected: false,
@@ -5558,6 +5559,7 @@ async function refreshTeacherDashboard() {
     if (!state.teacherUser || state.teacherRole !== "teacher") return;
     const teacherSnap = await window.db.collection("teachers").doc(state.teacherUser.uid).get();
     const teacherData = teacherSnap.exists ? (teacherSnap.data() || {}) : {};
+    state.teacherCalendarStatistics = teacherData.calendarStatistics || state.teacherCalendarStatistics || {};
     state.teacherRevenueTotal = Number.isFinite(Number(teacherData.revenueTotal))
         ? Number(teacherData.revenueTotal)
         : 0;
@@ -5822,29 +5824,10 @@ function updateTeacherOverviewStats() {
 
     const now = Date.now();
 
-    // 1. Calculate Active Students dynamically
+    // Active students combines current accounts with unique taught students
+    // retained by the existing Preply/platform synchronization history.
     if (activeStudentsEl) {
-        let baseStudents = 85;
-        const baseStr = state.profileSettings?.activeStudentsCount || state.profileSettings?.studentsCount || "85+";
-        const parsedBase = parseInt(String(baseStr).replace(/[^0-9]/g, ""), 10);
-        if (!isNaN(parsedBase)) {
-            baseStudents = parsedBase;
-        }
-
-        const registeredCount = Array.isArray(state.studentsCache) ? state.studentsCache.length : 0;
-
-        // Find unique student emails/uids in bookings
-        const bookingStudentKeys = new Set();
-        bookingsList.forEach(b => {
-            const status = (b.status || "").toLowerCase();
-            if (status !== "canceled") {
-                const key = b.studentUid || b.email || b.studentEmail || b.name;
-                if (key) bookingStudentKeys.add(key);
-            }
-        });
-
-        const dynamicTotal = Math.max(registeredCount, baseStudents, bookingStudentKeys.size);
-        activeStudentsEl.textContent = `${dynamicTotal.toLocaleString()}+`;
+        activeStudentsEl.textContent = getActiveStudentCount().toLocaleString();
     }
 
     // 2. Calculate Upcoming Bookings
@@ -5904,6 +5887,37 @@ function parseProfileCounter(value, fallback = 0) {
     return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function getActiveStudentCount(students = state.studentsCache, statistics = state.teacherCalendarStatistics) {
+    const registered = Array.isArray(students) ? students : [];
+    const registeredAliases = new Set();
+    registered.forEach((student) => [student.id, student.uid, student.email, student.name].forEach((value) => {
+        const key = String(value || "").trim().toLowerCase();
+        if (key) registeredAliases.add(key);
+    }));
+    const taught = new Set([
+        ...(Array.isArray(statistics?.knownStudentKeys) ? statistics.knownStudentKeys : []),
+        ...(Array.isArray(statistics?.knownPlatformStudentKeys) ? statistics.knownPlatformStudentKeys : []),
+    ].map((value) => String(value || "").trim().toLowerCase()).filter(Boolean));
+    let externalTaught = 0;
+    taught.forEach((key) => { if (!registeredAliases.has(key)) externalTaught += 1; });
+    return registered.length + externalTaught;
+}
+
+async function syncPublicStudentCounts(students = state.studentsCache) {
+    const registeredCount = Array.isArray(students) ? students.length : 0;
+    const activeCount = getActiveStudentCount(students);
+    const currentRegistered = parseProfileCounter(state.profileSettings?.registeredStudentsCount, -1);
+    const currentActive = parseProfileCounter(state.profileSettings?.activeStudentsCount ?? state.profileSettings?.studentsCount, -1);
+    if (currentRegistered === registeredCount && currentActive === activeCount) return false;
+    state.profileSettings = { ...state.profileSettings, registeredStudentsCount: String(registeredCount), activeStudentsCount: String(activeCount), studentsCount: String(activeCount) };
+    await window.db.collection("teacherProfile").doc("primary").set({
+        registeredStudentsCount: String(registeredCount), activeStudentsCount: String(activeCount), studentsCount: String(activeCount), studentCountsUpdatedAt: Date.now(),
+    }, { merge: true });
+    saveLocalProfileSettings("teacher_profile_v1", state.profileSettings);
+    renderProfileUi();
+    return true;
+}
+
 function renderPreplyStatisticsSummary(statistics = {}) {
     if (!els.preplyStatsSummary) return;
     const initialized = statistics.initialized === true;
@@ -5946,7 +5960,6 @@ async function syncPreplyStatistics() {
     const newEventIds = firstSync ? [] : currentEventIds.filter((eventId) => !existingEventIds.has(eventId));
     const newStudentKeys = firstSync ? [] : currentStudentKeys.filter((studentKey) => !existingStudentKeys.has(studentKey));
     const currentLessons = parseProfileCounter(state.profileSettings?.hoursTaught, 1200);
-    const currentStudents = parseProfileCounter(state.profileSettings?.studentsCount, 85);
     const now = Date.now();
     const calendarStatistics = {
         ...previous,
@@ -5954,7 +5967,7 @@ async function syncPreplyStatistics() {
         processedEventIds: Array.from(new Set([...existingEventIds, ...currentEventIds])).slice(-5000),
         knownStudentKeys: Array.from(new Set([...existingStudentKeys, ...currentStudentKeys])).slice(-5000),
         baselineLessons: Number(previous.baselineLessons || currentLessons),
-        baselineStudents: Number(previous.baselineStudents || currentStudents),
+        baselineStudents: Number(previous.baselineStudents || getActiveStudentCount()),
         lessonsAdded: Number(previous.lessonsAdded || 0) + newEventIds.length,
         studentsAdded: Number(previous.studentsAdded || 0) + newStudentKeys.length,
         lastCalendarLessonCount: Number(result.completedLessons || 0),
@@ -5962,15 +5975,16 @@ async function syncPreplyStatistics() {
         lastLookbackDays: lookbackDays,
         lastSyncedAt: now,
     };
+    state.teacherCalendarStatistics = calendarStatistics;
     await teacherRef.set({
         calendarStatistics,
         updatedAt: now,
     }, { merge: true });
+    await syncPublicStudentCounts();
     if (!firstSync && (newEventIds.length || newStudentKeys.length)) {
         state.profileSettings = {
             ...state.profileSettings,
             hoursTaught: `${currentLessons + newEventIds.length}+`,
-            studentsCount: `${currentStudents + newStudentKeys.length}+`,
             calendarStatsUpdatedAt: now,
         };
         await saveCloudProfileSettings(window.db, state.profileSettings);
@@ -6038,15 +6052,15 @@ async function syncPlatformStatistics() {
         lastPlatformStudentCount: studentKeys.length,
         lastPlatformSyncedAt: syncedAt,
     };
+    state.teacherCalendarStatistics = calendarStatistics;
     await teacherRef.set({ calendarStatistics, updatedAt: syncedAt }, { merge: true });
+    await syncPublicStudentCounts();
 
     if (newLessonIds.length || newStudentKeys.length) {
         const currentLessons = parseProfileCounter(state.profileSettings?.hoursTaught, 1200);
-        const currentStudents = parseProfileCounter(state.profileSettings?.studentsCount, 85);
         state.profileSettings = {
             ...state.profileSettings,
             hoursTaught: `${currentLessons + newLessonIds.length}+`,
-            studentsCount: `${currentStudents + newStudentKeys.length}+`,
             platformStatsUpdatedAt: syncedAt,
         };
         await saveCloudProfileSettings(window.db, state.profileSettings);
@@ -6609,7 +6623,7 @@ function renderProfileUi() {
     if (els.preplyArabicName) els.preplyArabicName.textContent = "";
     if (els.preplyTeacherHeadline) els.preplyTeacherHeadline.textContent = p.headline || "";
     if (els.preplyHoursBadge) els.preplyHoursBadge.textContent = p.hoursTaught || "1,200+";
-    if (els.preplyStudentsBadge) els.preplyStudentsBadge.textContent = p.studentsCount || "85+";
+    if (els.preplyStudentsBadge) els.preplyStudentsBadge.textContent = p.activeStudentsCount ?? p.studentsCount ?? "0";
     if (els.preplyQuoteArabic) els.preplyQuoteArabic.textContent = p.quoteArabic ? `"${p.quoteArabic.replace(/^["'«»]|["'«»]$/g, '')}"` : "";
     if (els.preplyBioText) {
         els.preplyBioText.innerHTML = escapeHtml(p.bioText || "").replace(/\n/g, "<br>");
@@ -7083,6 +7097,7 @@ async function refreshTeacherStudents() {
         }
         students.sort((a, b) => String(a.name || a.email || "").localeCompare(String(b.name || b.email || "")));
         state.studentsCache = students;
+        await syncPublicStudentCounts(students).catch((error) => console.warn("Could not update the public student counts.", error));
         updateTeacherOverviewStats();
         if (!students.length) {
             els.teacherStudentsList.innerHTML = "<div class=\"small-note\">No students yet.</div>";
@@ -9201,7 +9216,8 @@ async function handleAuthState(user) {
 
     window.db.collection("teachers").doc(user.uid).get().then((teacherDoc) => {
         const teacherData = teacherDoc.exists ? (teacherDoc.data() || {}) : {};
-        renderPreplyStatisticsSummary(teacherData.calendarStatistics || {});
+        state.teacherCalendarStatistics = teacherData.calendarStatistics || {};
+        renderPreplyStatisticsSummary(state.teacherCalendarStatistics);
         if (els.teacherAppsScriptUrl) els.teacherAppsScriptUrl.value = teacherData.appsScript?.webAppUrl || "";
         if (els.teacherPreplyCalendarId) {
             els.teacherPreplyCalendarId.value = teacherData.preplyCalendarId || teacherData.googleCalendar?.preplyCalendarId || "";
