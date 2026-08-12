@@ -1371,6 +1371,43 @@ main.site-shell {
         grid-template-columns: 1fr;
     }
 
+    #studentAuthModal {
+        align-items: flex-end;
+        padding: 0;
+    }
+
+    #studentAuthModal .modal__body {
+        width: 100%;
+        max-height: 94dvh;
+        margin: 0;
+        padding: 24px 18px calc(20px + env(safe-area-inset-bottom));
+        border-radius: 24px 24px 0 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+    }
+
+    #studentAuthModal .student-auth-toggle {
+        position: sticky;
+        top: -24px;
+        z-index: 2;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        padding: 8px 0 10px;
+        background: var(--surface-strong);
+    }
+
+    #studentAuthModal .student-auth-toggle .btn,
+    #studentAuthModal input,
+    #studentAuthModal select,
+    #studentAuthModal button[type="submit"] {
+        min-height: 48px;
+    }
+
+    #studentAuthModal input,
+    #studentAuthModal select {
+        font-size: 16px;
+    }
+
     .week-grid {
         display: grid;
         grid-template-columns: 1fr;

@@ -4320,16 +4320,41 @@ function wireStudentActions() {
                     setButtonLoading(els.studentAuthSubmit, false);
                     return;
                 }
-                const cred = await window.auth.createUserWithEmailAndPassword(email, password);
-                await cred.user.updateProfile({ displayName: name });
-                await window.db.collection("users").doc(cred.user.uid).set({
+                let cred;
+                let newlyCreatedUser = null;
+                try {
+                    cred = await window.auth.createUserWithEmailAndPassword(email, password);
+                    newlyCreatedUser = cred.user;
+                } catch (createError) {
+                    if (createError?.code !== "auth/email-already-in-use") throw createError;
+                    // Recover an Auth account left behind by an earlier failed
+                    // Firestore profile write. A complete account must use Sign In.
+                    cred = await window.auth.signInWithEmailAndPassword(email, password);
+                    const existingProfile = await window.db.collection("users").doc(cred.user.uid).get();
+                    if (existingProfile.exists) {
+                        await window.auth.signOut();
+                        throw new Error("This account already exists. Choose Sign In instead.");
+                    }
+                }
+                try {
+                    await cred.user.updateProfile({ displayName: name });
+                    await window.db.collection("users").doc(cred.user.uid).set({
                     email,
                     name,
                     phone,
                     role: "student",
                     createdAt: window.firebase.firestore.FieldValue.serverTimestamp(),
                     updatedAt: window.firebase.firestore.FieldValue.serverTimestamp(),
-                });
+                    createdBy: "student-signup",
+                    });
+                } catch (profileError) {
+                    if (newlyCreatedUser) {
+                        await newlyCreatedUser.delete().catch(() => {});
+                    }
+                    throw new Error(profileError?.code === "permission-denied"
+                        ? "Account setup was blocked by Firebase permissions. Please try again after the teacher updates the site."
+                        : (profileError?.message || "Could not finish creating the student profile."));
+                }
                 setStatus(els.studentAuthMsg, "Account created. You can book now.", "success");
                 els.studentAuthModal?.classList.remove("modal--open");
                 showScreen("student-screen");
