@@ -6723,12 +6723,36 @@ async function ensureAllReviewsLoaded() {
     return state.reviewsLoadInFlight;
 }
 
+async function syncPublicReviewSummary(reviews = state.reviews) {
+    const list = Array.isArray(reviews) ? reviews : [];
+    const count = list.length;
+    const average = count
+        ? Math.round((list.reduce((sum, review) => sum + Number(review.rating || 5), 0) / count) * 100) / 100
+        : 0;
+    const oldCount = Number(state.profileSettings?.reviewsTotalCount || 0);
+    const oldAverage = Number(state.profileSettings?.reviewsAverageRating || 0);
+    state.profileSettings = { ...state.profileSettings, reviewsTotalCount: count, reviewsAverageRating: average };
+    if (oldCount === count && oldAverage === average) return false;
+    await window.db.collection("teacherProfile").doc("primary").set({
+        reviewsTotalCount: count,
+        reviewsAverageRating: average,
+        reviewsSummaryUpdatedAt: Date.now(),
+    }, { merge: true });
+    saveLocalProfileSettings("teacher_profile_v1", state.profileSettings);
+    return true;
+}
+
 function renderReviewsUi() {
     const list = state.reviews || [];
-    const count = list.length;
+    const loadedCount = list.length;
+    const storedTotal = Math.max(0, Number(state.profileSettings?.reviewsTotalCount || 0));
+    const count = state.reviewsLoadedAll ? loadedCount : Math.max(loadedCount, storedTotal);
     let totalStars = 0;
     list.forEach(r => { totalStars += Number(r.rating || 5); });
-    const avgScore = count > 0 ? (totalStars / count).toFixed(1) : "5.0";
+    const storedAverage = Number(state.profileSettings?.reviewsAverageRating || 0);
+    const avgScore = !state.reviewsLoadedAll && storedAverage > 0
+        ? storedAverage.toFixed(1)
+        : loadedCount > 0 ? (totalStars / loadedCount).toFixed(1) : "5.0";
 
     const hidePublic = !!state.profileSettings?.hideReviewsPublic;
     if (els.studentReviewsSection) {
@@ -6750,7 +6774,7 @@ function renderReviewsUi() {
     }
 
     if (els.preplyReviewsGrid) {
-        if (!count) {
+        if (!loadedCount) {
             els.preplyReviewsGrid.innerHTML = `<div class="small-note">No reviews published yet. Be the first to leave a review!</div>`;
         } else {
             const sortedList = [...list];
@@ -6808,7 +6832,7 @@ function renderReviewsUi() {
     }
 
     if (els.teacherReviewsAdminList) {
-        if (!count) {
+        if (!loadedCount) {
             els.teacherReviewsAdminList.innerHTML = `<div class="small-note">No reviews stored yet.</div>`;
         } else {
             els.teacherReviewsAdminList.innerHTML = list.map(r => {
@@ -8054,6 +8078,7 @@ function wireTeacherActions() {
         const websiteReviews = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })).filter((review) => review.source === "Student Review");
         state.reviews = [...result.reviews, ...websiteReviews];
         saveLocalReviews("teacher_reviews_v1", state.reviews);
+        await syncPublicReviewSummary(state.reviews);
         renderReviewsUi();
         return { total: result.reviews.length, writes: writeCount, newCount, updatedCount, removedCount };
     };
@@ -8105,6 +8130,7 @@ function wireTeacherActions() {
                 await deleteReviewFromCloud(window.db, reviewId);
                 state.reviews = state.reviews.filter(r => r.id !== reviewId);
                 saveLocalReviews("teacher_reviews_v1", state.reviews);
+                await syncPublicReviewSummary(state.reviews);
                 renderReviewsUi();
             });
         } catch (error) {

@@ -1,5 +1,5 @@
 import "./core/errorHandler.js?v=20260724-lesson-feedback-v4";
 import "./apps-script-sync.js?v=20260808-phase2-calendar-sync-v1";
-import "./booking-app.js?v=20260812-student-counts-v22";
+import "./booking-app.js?v=20260812-review-total-v23";
 
 console.log("Booking-only app initialized");

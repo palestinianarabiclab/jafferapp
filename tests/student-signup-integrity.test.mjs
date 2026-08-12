@@ -35,3 +35,10 @@ test("active students combines registered and uniquely taught students", () => {
     assert.match(app, /async function syncPublicStudentCounts/);
     assert.match(app, /currentRegistered === registeredCount && currentActive === activeCount/);
 });
+
+test("review header uses stored total while only six review bodies are loaded", () => {
+    assert.match(app, /const storedTotal = Math\.max\(0, Number\(state\.profileSettings\?\.reviewsTotalCount/);
+    assert.match(app, /state\.reviewsLoadedAll \? loadedCount : Math\.max\(loadedCount, storedTotal\)/);
+    assert.match(app, /loadCloudReviews\(window\.db, undefined, \{ limit: 6 \}\)/);
+    assert.match(app, /async function syncPublicReviewSummary/);
+});
