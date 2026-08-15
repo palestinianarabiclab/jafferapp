@@ -940,7 +940,12 @@ main.site-shell {
 
 .student-admin-item {
     display: grid;
-    gap: 12px;
+    gap: 0;
+    overflow: hidden;
+    border: 1px solid rgba(15, 118, 110, 0.14);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 8px 24px rgba(51, 65, 85, 0.06);
 }
 
 .student-admin-item__summary {
@@ -949,12 +954,27 @@ main.site-shell {
     justify-content: space-between;
     gap: 14px;
     width: 100%;
-    padding: 0;
+    padding: 16px 18px;
     border: 0;
     background: transparent;
     color: inherit;
     text-align: left;
 }
+
+.student-admin-item__summary:hover { background: rgba(15, 118, 110, 0.035); }
+.student-admin-item__identity { display: flex; align-items: center; gap: 12px; min-width: 190px; }
+.student-admin-item__avatar { display: grid !important; place-items: center; flex: 0 0 42px; width: 42px; height: 42px; border-radius: 13px; background: linear-gradient(135deg, var(--primary), var(--primary-dark)); color: #fff !important; font-size: 1rem !important; font-weight: 800; }
+.student-admin-metrics { display: flex !important; justify-content: flex-end; gap: 8px; flex: 1; }
+.student-admin-metric { display: grid !important; min-width: 82px; padding: 7px 10px; border-radius: 11px; background: var(--bg-soft); text-align: center; }
+.student-admin-metric small { color: var(--muted); font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.student-admin-metric strong { color: var(--ink); font-size: 0.92rem; }
+.student-admin-metric--status strong { color: var(--primary-dark); text-transform: capitalize; }
+.student-admin-item__chevron { color: var(--primary-dark); font-size: 1.3rem; }
+.student-admin-editor { padding: 18px; border-top: 1px solid var(--line); background: rgba(248, 250, 252, 0.7); }
+.student-admin-editor__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.student-admin-editor__head strong, .student-admin-editor__head span { display: block; }
+.student-admin-editor__head span { margin-top: 2px; color: var(--muted); font-size: 0.82rem; }
+.student-admin-redundant-note { display: none; }
 
 .student-admin-item__summary strong,
 .student-admin-item__summary span span {
@@ -974,6 +994,13 @@ main.site-shell {
 
 .student-admin-editor[hidden] {
     display: none;
+}
+
+@media (max-width: 850px) {
+    .student-admin-item__summary { align-items: flex-start; flex-wrap: wrap; }
+    .student-admin-metrics { order: 3; flex: 1 0 100%; justify-content: stretch; }
+    .student-admin-metric { flex: 1; min-width: 70px; }
+    .student-admin-editor__head { align-items: stretch; flex-direction: column; }
 }
 
 .dashboard[hidden] {
