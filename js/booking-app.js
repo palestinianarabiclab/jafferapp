@@ -8785,6 +8785,33 @@ function wireTeacherActions() {
         button.addEventListener("click", closeStudentLessonsModal);
     });
 
+    let studentInvitationTargetId = "";
+    let studentInvitationReturnFocus = null;
+    const closeStudentInvitationModal = () => {
+        const modal = document.getElementById("studentInvitationModal");
+        if (modal?.contains(document.activeElement)) studentInvitationReturnFocus?.focus();
+        modal?.classList.remove("modal--open");
+        modal?.setAttribute("aria-hidden", "true");
+        studentInvitationTargetId = "";
+        studentInvitationReturnFocus = null;
+    };
+    document.querySelectorAll("[data-close-student-invitation]").forEach((button) => button.addEventListener("click", closeStudentInvitationModal));
+    document.getElementById("studentInvitationModal")?.addEventListener("click", (event) => {
+        const option = event.target.closest("[data-invitation-template]");
+        if (!option || !studentInvitationTargetId) return;
+        const student = state.studentCache.get(studentInvitationTargetId) || {};
+        withButtonLoading(option, "Sending...", async () => {
+            const result = await window.sendStudentBookingInvitationViaAppsScript?.({
+                studentId: studentInvitationTargetId,
+                template: option.dataset.invitationTemplate,
+            });
+            if (!result?.success) throw new Error(result?.message || "The email was not sent.");
+            closeStudentInvitationModal();
+            const kind = option.dataset.invitationTemplate === "welcome" ? "Welcome email" : "Lesson invitation";
+            setStatus(els.teacherStudentsMsg, kind + " sent to " + (student.name || student.email || "student") + ".", "success");
+        }).catch((error) => setStatus(document.getElementById("studentInvitationMsg"), error.message || "Could not send the email.", "error"));
+    });
+
     els.teacherStudentsList?.addEventListener("click", (event) => {
         const viewLessonsBtn = event.target.closest("[data-student-action='view-lessons']");
         if (viewLessonsBtn) {
@@ -8908,14 +8935,14 @@ function wireTeacherActions() {
             const studentId = invitationBtn.dataset.studentId;
             if (!studentId) return;
             const student = state.studentCache.get(studentId) || {};
-            const label = student.name || student.email || "student";
-            withButtonLoading(invitationBtn, "Sending...", async () => {
-                const result = await window.sendStudentBookingInvitationViaAppsScript?.({ studentId });
-                if (!result?.success) throw new Error(result?.message || "The invitation email was not sent.");
-                setStatus(els.teacherStudentsMsg, `Lesson invitation sent to ${label}.`, "success");
-            }).catch((error) => {
-                setStatus(els.teacherStudentsMsg, error.message || "Could not send the lesson invitation.", "error");
-            });
+            studentInvitationTargetId = studentId;
+            studentInvitationReturnFocus = invitationBtn;
+            const modal = document.getElementById("studentInvitationModal");
+            document.getElementById("studentInvitationSubtitle").textContent = "Choose the email to send to " + (student.name || student.email || "this student") + ".";
+            setStatus(document.getElementById("studentInvitationMsg"), "");
+            modal?.classList.add("modal--open");
+            modal?.setAttribute("aria-hidden", "false");
+            window.setTimeout(() => modal?.querySelector("[data-invitation-template]")?.focus(), 0);
             return;
         }
 

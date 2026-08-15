@@ -183,8 +183,8 @@ async function notifyNewStudentSignupViaAppsScript({ studentId } = {}) {
     return callAppsScript("notifyNewStudentSignup", { studentId });
 }
 
-async function sendStudentBookingInvitationViaAppsScript({ studentId } = {}) {
-    return callAppsScript("sendStudentBookingInvitation", { studentId });
+async function sendStudentBookingInvitationViaAppsScript({ studentId, template = "book-more" } = {}) {
+    return callAppsScript("sendStudentBookingInvitation", { studentId, template });
 }
 
 async function getPreplyStatisticsViaAppsScript({ days = 730 } = {}) {

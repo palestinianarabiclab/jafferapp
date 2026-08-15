@@ -278,6 +278,16 @@ function sendStudentBookingInvitationEmail_(recipient, details) {
   return sendRichEmail_(recipient, subject, body, html, teacherName + ' Arabic Lessons');
 }
 
+function sendStudentWelcomeEmail_(recipient, details) {
+  const teacherName = details.teacherName || 'Teacher';
+  const studentName = details.name || 'Student';
+  const siteUrl = safeEmailUrl_(details.siteUrl);
+  const subject = 'Welcome to your Arabic learning journey, ' + studentName + '!';
+  const body = ['Hi ' + studentName + ',', '', 'Ahlan wa sahlan! I am very happy to welcome you.', 'Learning Palestinian Arabic is more than learning words. It is a way to connect with people, stories, culture, and everyday life.', 'Whenever you are ready, visit the website and choose a lesson time that works for you.', '', siteUrl, '', 'I look forward to meeting you!', teacherName].join('\n');
+  const html = '<div style="margin:0;padding:24px;background:#f4f1ea;font-family:Arial,sans-serif;color:#172033;"><div style="max-width:620px;margin:auto;overflow:hidden;border:1px solid #ded8ca;border-radius:18px;background:#fff;box-shadow:0 8px 28px rgba(23,32,51,.08);"><div style="padding:34px 28px;background:linear-gradient(145deg,#111827 0%,#0f766e 48%,#15803d 75%,#b91c1c 100%);color:#fff;text-align:center;"><div style="font-size:30px;font-weight:800;direction:rtl;">أهلاً وسهلاً</div><div style="margin-top:7px;font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Welcome to Palestinian Arabic</div><div style="width:72px;height:4px;margin:18px auto 0;border-radius:4px;background:#fff;"></div></div><div style="padding:30px;"><p style="margin:0 0 15px;font-size:17px;">Hi <strong>' + escapeEmailHtml_(studentName) + '</strong>,</p><p style="margin:0 0 15px;line-height:1.7;color:#475569;"><strong>Ahlan wa sahlan!</strong> I\'m very happy to welcome you. Learning Palestinian Arabic is more than learning words—it\'s a way to connect with people, stories, culture, and everyday life.</p><p style="margin:0 0 22px;line-height:1.7;color:#475569;">Whenever you\'re ready, visit the website and choose a lesson time that works for you. We\'ll take it step by step and build your confidence together.</p>' + (siteUrl ? '<a href="' + escapeEmailHtml_(siteUrl) + '" style="display:inline-block;padding:14px 22px;border-radius:10px;background:#0f766e;color:#fff;text-decoration:none;font-weight:700;">Explore Lessons & Schedule</a>' : '') + '<p style="margin:26px 0 0;line-height:1.6;color:#475569;">I look forward to meeting you!<br><strong>' + escapeEmailHtml_(teacherName) + '</strong></p></div><div style="padding:15px 30px;background:#f8fafc;color:#64748b;font-size:12px;text-align:center;">Palestinian Arabic • Real conversations • Learning with confidence</div></div></div>';
+  return sendRichEmail_(recipient, subject, body, html, teacherName + ' Arabic Lessons');
+}
+
 function sendLessonReminderEmail_(recipient, details) {
   const teacherName = details.teacherName || 'Jaffer';
   const subject = 'Your Arabic lesson with ' + teacherName + ' starts soon';
@@ -1947,14 +1957,19 @@ function handleRequest_(e) {
       const studentDoc = firestoreFetch_(config, caller.token, '/users/' + encodeURIComponent(studentId), { method: 'get' });
       const email = fsString_(studentDoc, 'email');
       const name = fsString_(studentDoc, 'name') || 'Student';
+      const template = String(req.template || 'book-more');
+      if (template !== 'welcome' && template !== 'book-more') return jsonOut({ success: false, message: 'Unknown email template.' });
       if (!isValidEmail_(email)) return jsonOut({ success: false, message: 'The student does not have a valid email.' });
-      const sent = sendStudentBookingInvitationEmail_(email, { name: name, teacherName: config.teacherName, siteUrl: config.siteUrl });
+      const emailDetails = { name: name, teacherName: config.teacherName, siteUrl: config.siteUrl };
+      const sent = template === 'welcome'
+        ? sendStudentWelcomeEmail_(email, emailDetails)
+        : sendStudentBookingInvitationEmail_(email, emailDetails);
       if (sent) firestoreIamPatch_(config, 'users', studentId, {
         lastBookingInvitationEmailAt: Date.now(),
         lastBookingInvitationEmailBy: caller.uid,
         updatedAt: Date.now()
       });
-      return jsonOut({ success: sent, message: sent ? 'Lesson invitation email sent.' : 'Lesson invitation email was not sent.' });
+      return jsonOut({ success: sent, message: sent ? (template === 'welcome' ? 'Welcome email sent.' : 'Lesson invitation email sent.') : 'The student email was not sent.' });
     }
 
     if (action === 'createBooking') {
