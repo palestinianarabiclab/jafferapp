@@ -5675,8 +5675,10 @@ function renderTeacherUpcomingLessonBanner() {
         const slotEnd = slotStart + durationMinutes * 60 * 1000;
         const accessState = getLessonAccessState(slotStart, now, { lessonMinutes: durationMinutes });
 
-        // Show if active now or starting in less than 12 hours
-        if (now >= slotStart && accessState.canEnter) return true;
+        // Keep the banner on the current lesson only until its real end. The
+        // re-entry grace period remains valid from lesson history, but it must
+        // not hide a back-to-back lesson that is starting now.
+        if (now >= slotStart && now < slotEnd && accessState.canEnter) return true;
         if (slotStart > now && (slotStart - now) <= cutoffMs) return true;
 
         return false;
@@ -5699,6 +5701,10 @@ function renderTeacherUpcomingLessonBanner() {
 
     const updateBannerContent = () => {
         const currentNow = Date.now();
+        if (currentNow >= slotEnd) {
+            renderTeacherUpcomingLessonBanner();
+            return;
+        }
         const isLive = currentNow >= slotStart && currentNow < slotEnd;
         const accessState = getLessonAccessState(slotStart, currentNow, { lessonMinutes: lessonDurationMinutes });
         let countdownText = "";
