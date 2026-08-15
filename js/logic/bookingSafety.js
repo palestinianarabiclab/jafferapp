@@ -81,7 +81,7 @@ export function shouldConsumeLesson(booking = {}, now = Date.now(), ledgerExists
         !booking.balanceChargedAt &&
         booking.balanceCharged !== true &&
         !ledgerExists &&
-        (lateCancellation || getLessonEndAt(booking) <= now)
+        (lateCancellation || status === "completed" || getLessonEndAt(booking) <= now)
     );
 }
 

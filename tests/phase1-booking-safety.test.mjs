@@ -102,6 +102,11 @@ test("14. lesson consumes only after scheduled end", () => {
     assert.equal(shouldConsumeLesson(booking, getLessonEndAt(booking)), true);
 });
 
+test("14b. teacher-completed lesson consumes immediately", () => {
+    const booking = { studentUid: "u", status: "completed", slot: Date.now() + 3600000, durationMinutes: 50 };
+    assert.equal(shouldConsumeLesson(booking, Date.now()), true);
+});
+
 test("15. consumption is idempotent with marker or ledger", () => {
     const booking = { studentUid: "u", status: "completed", slot: 1, durationMinutes: 50 };
     assert.equal(shouldConsumeLesson({ ...booking, lessonConsumed: true }, Date.now()), false);

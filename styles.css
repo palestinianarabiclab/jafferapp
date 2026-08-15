@@ -1163,7 +1163,7 @@ main.site-shell {
     color: var(--muted);
 }
 
-.student-lessons-modal__body { width: min(1040px, calc(100% - 24px)); }
+.student-lessons-modal__body { width: min(1180px, calc(100% - 24px)); }
 .student-finance-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
 .student-finance-card { grid-column: span 2; margin: 0; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
 .student-finance-card--payment, .student-finance-card--refund { grid-column: span 3; }
@@ -1178,19 +1178,39 @@ main.site-shell {
 .student-lessons-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
 .student-lessons-summary div { padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg-soft); }
 .student-lessons-summary strong { display: block; font-size: 1.45rem; }
-.student-lessons-groups { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.student-lessons-groups { display: grid; grid-template-columns: repeat(3, minmax(280px, 1fr)); gap: 16px; align-items: start; }
 .student-lessons-group { min-width: 0; }
 .student-lessons-group h4 { margin: 0 0 10px; }
-.student-lesson-record { padding: 12px; margin-bottom: 9px; border: 1px solid var(--line); border-left: 4px solid #2563eb; border-radius: 12px; background: #fff; }
+.student-lesson-record { padding: 14px; margin-bottom: 12px; border: 1px solid var(--line); border-left: 4px solid #2563eb; border-radius: 14px; background: #fff; overflow-wrap: anywhere; box-shadow: 0 5px 16px rgba(15, 23, 42, .04); }
 .student-lesson-record--taken { border-left-color: #059669; }
 .student-lesson-record--canceled { border-left-color: #dc2626; opacity: .84; }
 .student-lesson-record strong, .student-lesson-record span { display: block; }
 .student-lesson-record span { margin-top: 4px; color: var(--muted); font-size: .84rem; }
+.student-lesson-record__heading { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+.student-lesson-record__status { flex:0 0 auto; margin:0!important; padding:3px 8px; border-radius:999px; background:#eef2ff; color:#3730a3!important; font-size:.7rem!important; font-weight:800; text-transform:capitalize; }
+.student-lesson-record__details { margin:10px 0; padding:9px; border-radius:10px; background:var(--bg-soft); font-size:.76rem; }
+.student-lesson-record__details div + div { margin-top:7px; }
+.student-lesson-record__details dt { color:var(--muted); font-weight:800; }
+.student-lesson-record__details dd { margin:2px 0 0; }
+.student-lesson-record__refund { margin-top:10px; width:100%; }
+.student-lesson-record__refunded { display:block; margin-top:10px!important; padding:8px; border-radius:9px; background:#ecfdf5; color:#047857!important; font-weight:800; text-align:center; }
+.student-financial-history { margin:0 0 24px; padding:18px; border:1px solid #cbd5e1; border-radius:18px; background:linear-gradient(145deg,#f8fafc,#fff); }
+.student-financial-history__head { display:flex; justify-content:space-between; gap:18px; align-items:flex-end; margin-bottom:14px; }
+.student-financial-history__head span { color:#0f766e; font-size:.72rem; font-weight:900; letter-spacing:.12em; text-transform:uppercase; }
+.student-financial-history__head h4 { margin:3px 0 0; font-size:1.2rem; }
+.student-financial-history__head small { max-width:420px; color:var(--muted); }
+.student-financial-timeline { display:grid; gap:8px; max-height:310px; overflow:auto; padding-right:4px; }
+.student-financial-entry { display:flex; justify-content:space-between; gap:18px; padding:11px 13px; border:1px solid var(--line); border-left:4px solid #64748b; border-radius:11px; background:#fff; }
+.student-financial-entry.is-credit { border-left-color:#16a34a; }.student-financial-entry.is-debit { border-left-color:#dc2626; }
+.student-financial-entry strong,.student-financial-entry time,.student-financial-entry__amount small { display:block; }
+.student-financial-entry time { margin-top:3px; color:var(--muted); font-size:.75rem; }
+.student-financial-entry__amount { flex:0 0 auto; color:#0f172a; font-weight:900; text-align:right; }
+.student-financial-entry__amount small { color:var(--muted); font-weight:500; }
 .cancellation-confirm__body { text-align: center; }
 .cancellation-confirm__icon { display: grid; place-items: center; width: 58px; height: 58px; margin: 0 auto 14px; border-radius: 50%; background: #fee2e2; color: #b91c1c; font-size: 2rem; font-weight: 900; }
 .cancellation-confirm__charge { margin: 16px 0; padding: 14px; border: 2px solid #dc2626; border-radius: 12px; background: #fef2f2; color: #991b1b; font-weight: 800; }
 .cancellation-confirm__charge.is-free { border-color: #10b981; background: #ecfdf5; color: #065f46; }
-@media (max-width: 760px) { .student-lessons-groups, .student-lessons-summary { grid-template-columns: 1fr; } .student-finance-grid { grid-template-columns: 1fr; } .student-finance-card, .student-finance-card--payment, .student-finance-card--refund { grid-column: auto; } }
+@media (max-width: 760px) { .student-lessons-groups, .student-lessons-summary { grid-template-columns: 1fr; } .student-finance-grid { grid-template-columns: 1fr; } .student-finance-card, .student-finance-card--payment, .student-finance-card--refund { grid-column: auto; } .student-financial-history__head,.student-financial-entry { align-items:flex-start; flex-direction:column; }.student-financial-entry__amount { text-align:left; } }
 
 .status-line {
     margin: 0;

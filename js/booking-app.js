@@ -4108,15 +4108,18 @@ function sendWhatsAppReminder(booking) {
 
 async function markBookingCompleted(bookingId, booking) {
     if (!window.db) return;
+    const completedAt = Date.now();
     await window.db.collection("bookings").doc(bookingId).set({
         status: "completed",
-        completedAt: Date.now(),
-        updatedAt: Date.now()
+        completedAt,
+        consumptionDueAt: completedAt,
+        consumptionState: booking?.isFreeTrial === true ? "not-required" : "pending",
+        updatedAt: completedAt
     }, { merge: true });
 
     await window.db.collection("publicBookings").doc(bookingId).set({
         status: "completed",
-        updatedAt: Date.now()
+        updatedAt: completedAt
     }, { merge: true });
 
     // Auto-increment hours taught in profile settings
@@ -4130,6 +4133,7 @@ async function markBookingCompleted(bookingId, booking) {
     saveLocalProfileSettings("teacher_profile_v1", state.profileSettings);
     await saveCloudProfileSettings(window.db, state.profileSettings);
     renderProfileUi();
+    await reconcileStudentBalances([bookingId]);
 }
 
 function wireStudentActions() {
@@ -6907,7 +6911,7 @@ function renderStudentLessonRecords(rows, className) {
         const dateLabel = slot ? new Date(slot).toLocaleString([], { dateStyle: "medium", timeStyle: "short", timeZone: getTeacherTimezone() }) : "Date unavailable";
         const status = String(booking.status || "booked").toLowerCase();
         const detail = booking.isFreeTrial ? "Free trial" : `${duration} minutes · ${status}`;
-        const deductions = Array.isArray(booking.deductions) ? booking.deductions : [];
+        const deductions = (Array.isArray(booking.deductions) ? booking.deductions : []).filter((entry) => String(entry.type || "consume") === "consume");
         const ledger = booking.accounting || deductions[0] || null;
         let accounting = "Price: unavailable / legacy";
         if (ledger && Number.isFinite(Number(ledger.amount))) {
@@ -6918,8 +6922,76 @@ function renderStudentLessonRecords(rows, className) {
         const deductionAudit = deductions.length
             ? `<small style="color:${deductions.length > 1 ? "#b91c1c" : "#166534"};font-weight:700;">${deductions.length > 1 ? `⚠ Duplicate deduction records: ${deductions.length}` : "Deduction records: 1"} — ${escapeHtml(deductions.map((entry) => `${entry.transactionId || "legacy"}: ${formatMoney(Math.abs(Number(entry.amount || 0)))}`).join(" | "))}</small>`
             : '<small>No deduction transaction found for this lesson.</small>';
-        return `<div class="student-lesson-record ${className}"><strong>${escapeHtml(dateLabel)}</strong><span>${escapeHtml(detail)}</span><small>${escapeHtml(accounting)}</small>${deductionAudit}</div>`;
+        const refundState = booking.consumptionRefundedAt
+            ? `<span class="student-lesson-record__refunded">Refunded ${escapeHtml(new Date(Number(booking.consumptionRefundedAt)).toLocaleString())}</span>`
+            : (ledger && !booking.isFreeTrial ? `<button type="button" class="btn btn--outline btn--small student-lesson-record__refund" data-refund-booking-id="${escapeHtml(booking.id)}">Refund this deduction</button>` : "");
+        return `<article class="student-lesson-record ${className}"><div class="student-lesson-record__heading"><strong>${escapeHtml(dateLabel)}</strong><span class="student-lesson-record__status">${escapeHtml(status)}</span></div><span>${escapeHtml(detail)}</span><dl class="student-lesson-record__details"><div><dt>Booking</dt><dd>${escapeHtml(booking.id)}</dd></div><div><dt>Accounting</dt><dd>${escapeHtml(accounting)}</dd></div></dl>${deductionAudit}${refundState}</article>`;
     }).join("");
+}
+
+function renderStudentFinancialHistory(student, ledgerRows = []) {
+    const rows = (Array.isArray(student?.transactions) ? student.transactions : []).map((entry) => ({
+        id: String(entry.id || ""), at: Number(entry.at || entry.createdAt || 0), amount: Number(entry.amount || 0),
+        lessonDelta: Number(entry.lessonCreditAdjustment || 0), description: String(entry.description || "Balance adjustment"),
+        balanceAfter: Number.isFinite(Number(entry.newBalance)) ? Number(entry.newBalance) : null,
+    }));
+    const known = new Set(rows.map((row) => row.id).filter(Boolean));
+    ledgerRows.forEach((entry) => {
+        const id = String(entry.transactionId || entry.id || "");
+        if (!id || known.has(id)) return;
+        const isRefund = String(entry.type || "") === "refund";
+        rows.push({ id, at: Number(entry.createdAt || entry.at || 0), amount: (isRefund ? 1 : -1) * Math.abs(Number(entry.amount || 0)), lessonDelta: (isRefund ? 1 : -1) * Number(entry.lessonDeducted || 1), description: isRefund ? "Lesson deduction refunded" : "Lesson completed / balance deducted", balanceAfter: null });
+    });
+    rows.sort((a, b) => b.at - a.at);
+    if (!rows.length) return '<div class="small-note">No financial activity recorded yet.</div>';
+    return `<div class="student-financial-timeline">${rows.map((row) => {
+        const modifier = row.amount > 0 || row.lessonDelta > 0 ? "is-credit" : row.amount < 0 || row.lessonDelta < 0 ? "is-debit" : "is-neutral";
+        const money = row.amount ? `${row.amount > 0 ? "+" : "-"}${formatMoney(Math.abs(row.amount))}` : "";
+        const lessons = row.lessonDelta ? `${row.lessonDelta > 0 ? "+" : ""}${row.lessonDelta} lesson${Math.abs(row.lessonDelta) === 1 ? "" : "s"}` : "";
+        return `<div class="student-financial-entry ${modifier}"><div><strong>${escapeHtml(row.description)}</strong><time>${row.at ? escapeHtml(new Date(row.at).toLocaleString()) : "Date unavailable"}</time></div><div class="student-financial-entry__amount">${escapeHtml([money, lessons].filter(Boolean).join(" · ") || "Recorded")}${row.balanceAfter !== null ? `<small>Balance after: ${escapeHtml(formatMoney(row.balanceAfter))}</small>` : ""}</div></div>`;
+    }).join("")}</div>`;
+}
+
+async function refundBookingConsumption(studentId, bookingId) {
+    const bookingRef = window.db.collection("bookings").doc(bookingId);
+    const consumeRef = window.db.collection("lessonBalanceTransactions").doc(`consume_${bookingId}`);
+    const refundRef = window.db.collection("lessonBalanceTransactions").doc(`refund_${bookingId}`);
+    const userRef = window.db.collection("users").doc(studentId);
+    const accountingRef = window.db.collection("studentAccounting").doc(studentId);
+    await window.db.runTransaction(async (transaction) => {
+        const bookingSnap = await transaction.get(bookingRef);
+        const consumeSnap = await transaction.get(consumeRef);
+        const refundSnap = await transaction.get(refundRef);
+        const userSnap = await transaction.get(userRef);
+        const accountingSnap = await transaction.get(accountingRef);
+        if (!bookingSnap.exists || !consumeSnap.exists || !userSnap.exists) throw new Error("The lesson deduction record was not found.");
+        if (refundSnap.exists || bookingSnap.data()?.consumptionRefundedAt) return;
+        const consume = consumeSnap.data() || {};
+        if (String(consume.studentUid || "") !== String(studentId)) throw new Error("This deduction belongs to another student.");
+        const packageRef = consume.packageId ? window.db.collection("lessonPackageEntitlements").doc(String(consume.packageId)) : null;
+        const packageSnap = packageRef ? await transaction.get(packageRef) : null;
+        const user = userSnap.data() || {};
+        const accounting = accountingSnap.exists ? (accountingSnap.data() || {}) : {};
+        const amount = Math.abs(Number(consume.amount || 0));
+        const lessonDelta = Math.max(0, Number(consume.lessonDeducted || 0));
+        const now = Date.now();
+        const nextBalance = toMoneyValue(Number(accounting.balance || 0) + amount);
+        const tx = { id: refundRef.id, at: now, amount, type: "refund", description: `Refunded lesson deduction: ${new Date(Number(bookingSnap.data()?.slot || now)).toLocaleString()}`, newBalance: nextBalance, lessonCreditAdjustment: lessonDelta, bookingId };
+        transaction.set(accountingRef, { balance: nextBalance, transactions: window.firebase.firestore.FieldValue.arrayUnion(tx), financeUpdatedAt: now, updatedAt: now }, { merge: true });
+        if (lessonDelta > 0) transaction.set(userRef, { lessonCredits: Math.max(0, Number(user.lessonCredits || 0)) + lessonDelta, updatedAt: window.firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
+        if (packageRef && packageSnap?.exists) {
+            const packageData = packageSnap.data() || {};
+            transaction.set(packageRef, {
+                remainingLessons: Math.min(Number(packageData.totalLessons || Infinity), Number(packageData.remainingLessons || 0) + lessonDelta),
+                consumedLessons: Math.max(0, Number(packageData.consumedLessons || 0) - lessonDelta),
+                remainingValueCents: Math.max(0, Number(packageData.remainingValueCents || 0) + Math.round(amount * 100)),
+                status: "active",
+                updatedAt: now,
+            }, { merge: true });
+        }
+        transaction.set(refundRef, { bookingId, studentUid: studentId, amount, lessonDeducted: lessonDelta, type: "refund", originalTransactionId: consumeRef.id, createdAt: now });
+        transaction.set(bookingRef, { consumptionRefundedAt: now, consumptionRefundTransactionId: refundRef.id, consumptionState: "refunded", reservationState: "refunded", updatedAt: now }, { merge: true });
+    });
 }
 
 function getBookingSlotMs(value) {
@@ -6949,9 +7021,10 @@ async function openStudentLessonsModal(student) {
         const queries = [Promise.resolve(uidSnapshot)];
         if (uidSnapshot.empty && student.email) queries.push(window.db.collection("bookings").where("email", "==", student.email).limit(200).get());
         if (uidSnapshot.empty && !student.email && student.name) queries.push(window.db.collection("bookings").where("name", "==", student.name).limit(200).get());
-        const [snapshots, ledgerSnap] = await Promise.all([
+        const [snapshots, ledgerSnap, accountingSnap] = await Promise.all([
             Promise.all(queries),
             window.db.collection("lessonBalanceTransactions").where("studentUid", "==", student.id).limit(300).get(),
+            window.db.collection("studentAccounting").doc(student.id).get(),
         ]);
         const deductionsByBooking = new Map();
         const seenTransactionIds = new Set();
@@ -6963,10 +7036,13 @@ async function openStudentLessonsModal(student) {
             if (!deductionsByBooking.has(bookingId)) deductionsByBooking.set(bookingId, []);
             deductionsByBooking.get(bookingId).push(entry);
         };
+        const ledgerRows = [];
         ledgerSnap.forEach((doc) => {
             const row = doc.data() || {};
-            if (row.bookingId) addDeduction(String(row.bookingId), { transactionId: doc.id, ...row });
+            ledgerRows.push({ transactionId: doc.id, ...row });
+            if (row.bookingId && String(row.type || "consume") === "consume") addDeduction(String(row.bookingId), { transactionId: doc.id, ...row });
         });
+        const accountingData = accountingSnap.exists ? (accountingSnap.data() || {}) : {};
         (Array.isArray(student.transactions) ? student.transactions : []).forEach((transaction) => {
             const transactionId = String(transaction?.id || "");
             const inferredBookingId = String(transaction?.bookingId || transactionId.match(/^consume_(.+)$/)?.[1] || transactionId.match(/^tx_(.+)_charge$/)?.[1] || "");
@@ -7003,11 +7079,28 @@ async function openStudentLessonsModal(student) {
         content.innerHTML = `
             ${deductionAuditAlert}
             <div class="student-lessons-summary"><div><strong>${upcoming.length}</strong><span>Upcoming</span></div><div><strong>${taken.length}</strong><span>Taken</span></div><div><strong>${canceled.length}</strong><span>Canceled</span></div></div>
+            <section class="student-financial-history"><div class="student-financial-history__head"><div><span>Financial record</span><h4>Balance & lesson activity</h4></div><small>Credits, payments, deductions and refunds with their recorded dates.</small></div>${renderStudentFinancialHistory({ ...student, transactions: accountingData.transactions || student.transactions || [] }, ledgerRows)}</section>
             <div class="student-lessons-groups">
                 <section class="student-lessons-group"><h4>Upcoming Lessons</h4>${renderStudentLessonRecords(upcoming, "")}</section>
                 <section class="student-lessons-group"><h4>Taken Lessons</h4>${renderStudentLessonRecords(taken, "student-lesson-record--taken")}</section>
                 <section class="student-lessons-group"><h4>Canceled Lessons</h4>${renderStudentLessonRecords(canceled, "student-lesson-record--canceled")}</section>
             </div>`;
+        content.querySelectorAll("[data-refund-booking-id]").forEach((button) => {
+            button.addEventListener("click", async () => {
+                if (!window.confirm("Return this lesson's money and lesson credit to the student?")) return;
+                button.disabled = true;
+                button.textContent = "Refunding...";
+                try {
+                    await refundBookingConsumption(student.id, button.dataset.refundBookingId);
+                    await openStudentLessonsModal(state.studentCache.get(student.id) || student);
+                    await refreshTeacherStudents();
+                } catch (error) {
+                    button.disabled = false;
+                    button.textContent = "Refund this deduction";
+                    window.alert(error.message || "Could not refund this deduction.");
+                }
+            });
+        });
     } catch (error) {
         content.innerHTML = `<div class="status-line is-error">${escapeHtml(error.message || "Could not load lesson history.")}</div>`;
     }
@@ -7675,8 +7768,17 @@ async function reconcileStudentBalancesLegacy() {
     return { chargedCount, missingPriceCount: missingPrice.size };
 }
 
-async function reconcileStudentBalances() {
+async function reconcileStudentBalances(priorityBookingIds = []) {
     const docs = await loadBalanceChargeCandidates(Date.now());
+    const docsById = new Map(docs.map((doc) => [doc.id, doc]));
+    for (const bookingId of priorityBookingIds) {
+        if (!bookingId || docsById.has(bookingId)) continue;
+        const priorityDoc = await window.db.collection("bookings").doc(bookingId).get();
+        if (priorityDoc.exists) {
+            docs.push(priorityDoc);
+            docsById.set(priorityDoc.id, priorityDoc);
+        }
+    }
     let chargedCount = 0;
     const missingPrice = new Set();
     for (const doc of docs) {
@@ -7684,7 +7786,7 @@ async function reconcileStudentBalances() {
         const initialStatus = String(initialBooking.status || "booked").toLowerCase();
         const lessonEndAt = getLessonEndAt(initialBooking);
         const initialLateCancellation = isChargeableLateCancellation(initialBooking, STUDENT_CHANGE_CUTOFF_MS);
-        if (!initialBooking.studentUid || (initialStatus === "canceled" && !initialLateCancellation) || (!initialLateCancellation && lessonEndAt > Date.now())) continue;
+        if (!initialBooking.studentUid || (initialStatus === "canceled" && !initialLateCancellation) || (!initialLateCancellation && initialStatus !== "completed" && lessonEndAt > Date.now())) continue;
 
         const bookingRef = window.db.collection("bookings").doc(doc.id);
         const userRef = window.db.collection("users").doc(initialBooking.studentUid);
