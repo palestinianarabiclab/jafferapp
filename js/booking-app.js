@@ -4360,6 +4360,13 @@ function wireStudentActions() {
                         ? "Account setup was blocked by Firebase permissions. Please try again after the teacher updates the site."
                         : (profileError?.message || "Could not finish creating the student profile."));
                 }
+                // The account is already complete at this point. Email delivery
+                // is best-effort and must never roll back or block sign-up.
+                window.notifyNewStudentSignupViaAppsScript?.({ studentId: cred.user.uid })
+                    .then((result) => {
+                        if (result && result.success === false) console.warn("Teacher signup notification was not sent:", result.message);
+                    })
+                    .catch((error) => console.warn("Teacher signup notification failed:", error));
                 setStatus(els.studentAuthMsg, "Account created. You can book now.", "success");
                 els.studentAuthModal?.classList.remove("modal--open");
                 showScreen("student-screen");
@@ -7269,7 +7276,10 @@ async function refreshTeacherStudents() {
                     <form class="student-admin-editor" data-student-editor hidden>
                         <div class="student-admin-editor__head">
                             <div><strong>Student account</strong><span>${escapeHtml(student.phone || "No phone number")}</span></div>
-                            <button class="btn btn--outline btn--small" type="button" data-student-action="view-lessons" data-student-id="${escapeHtml(student.id)}">View Lessons & deductions</button>
+                            <div class="student-admin-editor__actions">
+                                <button class="btn btn--outline btn--small" type="button" data-student-action="send-booking-invitation" data-student-id="${escapeHtml(student.id)}">Send Lesson Invitation</button>
+                                <button class="btn btn--outline btn--small" type="button" data-student-action="view-lessons" data-student-id="${escapeHtml(student.id)}">View Lessons & deductions</button>
+                            </div>
                         </div>
                         ${accessRequested ? `
                             <div style="background: #fef3c7; border: 1px solid #f59e0b; color: #92400e; padding: 10px 12px; border-radius: 8px; font-weight: 600; margin-bottom: 12px; font-size: 0.9rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
@@ -8889,6 +8899,22 @@ function wireTeacherActions() {
                 );
             }).catch((error) => {
                 setStatus(els.teacherStudentsMsg, error.message || "Could not request review.", "error");
+            });
+            return;
+        }
+
+        const invitationBtn = event.target.closest("[data-student-action='send-booking-invitation']");
+        if (invitationBtn) {
+            const studentId = invitationBtn.dataset.studentId;
+            if (!studentId) return;
+            const student = state.studentCache.get(studentId) || {};
+            const label = student.name || student.email || "student";
+            withButtonLoading(invitationBtn, "Sending...", async () => {
+                const result = await window.sendStudentBookingInvitationViaAppsScript?.({ studentId });
+                if (!result?.success) throw new Error(result?.message || "The invitation email was not sent.");
+                setStatus(els.teacherStudentsMsg, `Lesson invitation sent to ${label}.`, "success");
+            }).catch((error) => {
+                setStatus(els.teacherStudentsMsg, error.message || "Could not send the lesson invitation.", "error");
             });
             return;
         }

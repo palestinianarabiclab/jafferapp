@@ -179,6 +179,14 @@ async function sendReviewRequestViaAppsScript({ studentId, siteUrl } = {}) {
     return callAppsScript("sendReviewRequest", { studentId, siteUrl });
 }
 
+async function notifyNewStudentSignupViaAppsScript({ studentId } = {}) {
+    return callAppsScript("notifyNewStudentSignup", { studentId });
+}
+
+async function sendStudentBookingInvitationViaAppsScript({ studentId } = {}) {
+    return callAppsScript("sendStudentBookingInvitation", { studentId });
+}
+
 async function getPreplyStatisticsViaAppsScript({ days = 730 } = {}) {
     return callAppsScript("getPreplyStatistics", { days });
 }
@@ -348,6 +356,8 @@ window.testAppsScriptConnection = testAppsScriptConnection;
 window.fetchBusyBlocksFromAppsScript = fetchBusyBlocksFromAppsScript;
 window.createBusyBlockViaAppsScript = createBusyBlockViaAppsScript;
 window.sendReviewRequestViaAppsScript = sendReviewRequestViaAppsScript;
+window.notifyNewStudentSignupViaAppsScript = notifyNewStudentSignupViaAppsScript;
+window.sendStudentBookingInvitationViaAppsScript = sendStudentBookingInvitationViaAppsScript;
 window.getPreplyStatisticsViaAppsScript = getPreplyStatisticsViaAppsScript;
 window.getPreplyReviewsViaAppsScript = getPreplyReviewsViaAppsScript;
 window.getAppsScriptEmailQuota = getAppsScriptEmailQuota;

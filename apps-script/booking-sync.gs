@@ -73,6 +73,8 @@ function getConfig_() {
     additionalCalendarIds: parseCalendarIds_(additionalRaw),
     defaultTimeZone: getScriptProperty_(props, 'DEFAULT_TIMEZONE', '') || Session.getScriptTimeZone() || 'Africa/Cairo',
     notificationEmail: notificationEmail,
+    siteUrl: getScriptProperty_(props, 'SITE_URL', 'https://jafferbooking.vercel.app/'),
+    teacherName: getScriptProperty_(props, 'TEACHER_NAME', 'Jaffer'),
   };
 }
 
@@ -90,6 +92,24 @@ function sendPlainEmail_(recipient, subject, body) {
   const email = normalizeEmail_(recipient);
   if (!email) return false;
   MailApp.sendEmail(email, subject, body);
+  return true;
+}
+
+function escapeEmailHtml_(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, function (char) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char];
+  });
+}
+
+function safeEmailUrl_(value) {
+  const url = String(value || '').trim();
+  return /^https:\/\//i.test(url) ? url : '';
+}
+
+function sendRichEmail_(recipient, subject, textBody, htmlBody, senderName) {
+  const email = normalizeEmail_(recipient);
+  if (!email) return false;
+  MailApp.sendEmail({ to: email, subject: subject, body: textBody, htmlBody: htmlBody, name: senderName || 'Lesson Booking' });
   return true;
 }
 
@@ -227,22 +247,76 @@ function sendReviewRequestEmail_(recipient, details) {
   return sendPlainEmail_(recipient, subject, body);
 }
 
-function sendLessonReminderEmail_(recipient, details) {
-  const subject = 'Reminder: your lesson starts in 15 minutes';
+function sendNewStudentSignupEmail_(recipient, details) {
+  const teacherName = details.teacherName || 'Jaffer';
+  const subject = 'New student account: ' + (details.name || 'Student');
+  const dashboardUrl = safeEmailUrl_(details.dashboardUrl);
   const body = [
-    'Hello ' + (details.name || 'Student') + ',',
-    '',
-    'This is a quick reminder that your lesson starts in about 15 minutes.',
-    '',
-    'Date & time: ' + (details.slotLabel || ''),
-    'Teacher timezone: ' + (details.timeZone || ''),
-    'Booking ID: ' + (details.bookingId || ''),
-    '',
-    'Please be ready a few minutes early.',
-    '',
-    'See you soon.'
+    'Hello ' + teacherName + ',', '',
+    'A new student created an account on your lesson website.', '',
+    'Student: ' + (details.name || 'Student'),
+    'Email: ' + (details.email || ''),
+    details.phone ? 'Phone: ' + details.phone : '', '',
+    dashboardUrl ? 'Open teacher dashboard: ' + dashboardUrl : ''
+  ].filter(Boolean).join('\n');
+  const html = '<div style="margin:0;padding:24px;background:#f4f1ea;font-family:Arial,sans-serif;color:#172033;"><div style="max-width:620px;margin:auto;overflow:hidden;border:1px solid #ded8ca;border-radius:18px;background:#fff;box-shadow:0 8px 28px rgba(23,32,51,.08);"><div style="padding:25px 28px;background:#0f766e;color:#fff;"><div style="font-size:12px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;opacity:.85;">New student</div><h1 style="margin:8px 0 0;font-size:26px;">A student joined your website</h1></div><div style="padding:28px;"><p style="margin:0 0 18px;line-height:1.6;">Hello <strong>' + escapeEmailHtml_(teacherName) + '</strong>, a new student has successfully created an account.</p><div style="padding:17px;border-radius:12px;background:#f8fafc;border-left:4px solid #0f766e;"><strong style="font-size:18px;">' + escapeEmailHtml_(details.name || 'Student') + '</strong><div style="margin-top:7px;color:#475569;">' + escapeEmailHtml_(details.email || '') + '</div>' + (details.phone ? '<div style="margin-top:5px;color:#475569;">' + escapeEmailHtml_(details.phone) + '</div>' : '') + '</div>' + (dashboardUrl ? '<a href="' + escapeEmailHtml_(dashboardUrl) + '" style="display:inline-block;margin-top:22px;padding:13px 20px;border-radius:10px;background:#0f766e;color:#fff;text-decoration:none;font-weight:700;">Open Teacher Dashboard</a>' : '') + '</div></div></div>';
+  return sendRichEmail_(recipient, subject, body, html, teacherName + ' Arabic Lessons');
+}
+
+function sendStudentBookingInvitationEmail_(recipient, details) {
+  const teacherName = details.teacherName || 'Jaffer';
+  const studentName = details.name || 'Student';
+  const siteUrl = safeEmailUrl_(details.siteUrl);
+  const subject = 'Ready for your next Arabic lesson, ' + studentName + '?';
+  const body = [
+    'Hi ' + studentName + ',', '',
+    'I hope you are doing well. It has been a little while since your last booking, and I would love to continue building on your Arabic progress.',
+    'When you are ready, choose a lesson time that works for you using the link below.', '',
+    siteUrl, '', 'Hope to see you soon!', teacherName
   ].join('\n');
-  return sendPlainEmail_(recipient, subject, body);
+  const html = '<div style="margin:0;padding:24px;background:#f4f1ea;font-family:Arial,sans-serif;color:#172033;"><div style="max-width:620px;margin:auto;overflow:hidden;border:1px solid #ded8ca;border-radius:18px;background:#fff;box-shadow:0 8px 28px rgba(23,32,51,.08);"><div style="padding:28px;background:linear-gradient(135deg,#0f766e,#115e59);color:#fff;"><div style="font-size:12px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;opacity:.85;">Your Arabic journey</div><h1 style="margin:8px 0 0;font-size:27px;line-height:1.25;">Let\'s keep your progress moving</h1></div><div style="padding:30px;"><p style="margin:0 0 15px;font-size:17px;">Hi <strong>' + escapeEmailHtml_(studentName) + '</strong>,</p><p style="margin:0 0 15px;line-height:1.7;color:#475569;">I hope you\'re doing well. It\'s been a little while since your last booking, and I\'d love to continue building on your Arabic progress.</p><p style="margin:0 0 22px;line-height:1.7;color:#475569;">When you\'re ready, choose a time that works for you below. Hope to see you soon!</p>' + (siteUrl ? '<a href="' + escapeEmailHtml_(siteUrl) + '" style="display:inline-block;padding:14px 22px;border-radius:10px;background:#0f766e;color:#fff;text-decoration:none;font-weight:700;">Schedule Your Next Lesson</a>' : '') + '<p style="margin:26px 0 0;line-height:1.6;color:#475569;">Warmly,<br><strong>' + escapeEmailHtml_(teacherName) + '</strong></p></div><div style="padding:15px 30px;background:#f8fafc;color:#64748b;font-size:12px;">You received this personal invitation from your Arabic teacher.</div></div></div>';
+  return sendRichEmail_(recipient, subject, body, html, teacherName + ' Arabic Lessons');
+}
+
+function sendLessonReminderEmail_(recipient, details) {
+  const teacherName = details.teacherName || 'Jaffer';
+  const subject = 'Your Arabic lesson with ' + teacherName + ' starts soon';
+  const meetingUrl = safeEmailUrl_(details.meetingUrl);
+  const siteUrl = safeEmailUrl_(details.siteUrl);
+  const body = [
+    'Hello ' + (details.name || 'Student') + ',', '',
+    'Your Arabic lesson with ' + teacherName + ' starts in about 15 minutes.',
+    'You are making great progress. Get comfortable, bring your questions, and let us make this lesson count!', '',
+    'Date & time: ' + (details.slotLabel || ''), 'Timezone: ' + (details.timeZone || ''),
+    meetingUrl ? 'Join lesson: ' + meetingUrl : '', siteUrl ? 'Open your student account: ' + siteUrl : '', '',
+    'See you in class!', teacherName
+  ].filter(Boolean).join('\n');
+  const button = function (url, label, background) {
+    return url ? '<a href="' + escapeEmailHtml_(url) + '" style="display:inline-block;margin:6px 6px 6px 0;padding:13px 20px;border-radius:10px;background:' + background + ';color:#ffffff;text-decoration:none;font-weight:700;">' + label + '</a>' : '';
+  };
+  const html = '<div style="margin:0;padding:24px;background:#f4f1ea;font-family:Arial,sans-serif;color:#172033;">' +
+    '<div style="max-width:620px;margin:auto;overflow:hidden;border:1px solid #ded8ca;border-radius:18px;background:#ffffff;box-shadow:0 8px 28px rgba(23,32,51,.08);">' +
+    '<div style="padding:26px;background:linear-gradient(135deg,#0f766e,#115e59);color:#ffffff;"><div style="font-size:13px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;opacity:.85;">Lesson reminder</div><h1 style="margin:8px 0 0;font-size:27px;line-height:1.2;">Your Arabic lesson starts soon</h1></div>' +
+    '<div style="padding:28px;"><p style="margin:0 0 14px;font-size:17px;">Hello <strong>' + escapeEmailHtml_(details.name || 'Student') + '</strong>,</p>' +
+    '<p style="margin:0 0 18px;line-height:1.65;color:#475569;">Your lesson with <strong>' + escapeEmailHtml_(teacherName) + '</strong> starts in about 15 minutes. You are making great progress—bring your questions and let\'s make today\'s lesson count!</p>' +
+    '<div style="margin:18px 0;padding:16px;border-radius:12px;background:#f8fafc;border-left:4px solid #0f766e;"><strong style="display:block;font-size:17px;">' + escapeEmailHtml_(details.slotLabel || '') + '</strong><span style="display:block;margin-top:5px;color:#64748b;">Timezone: ' + escapeEmailHtml_(details.timeZone || '') + '</span></div>' +
+    '<div style="margin-top:20px;">' + button(meetingUrl, 'Join Google Meet', '#0f766e') + button(siteUrl, 'Open Student Website', '#c2410c') + '</div>' +
+    '<p style="margin:24px 0 0;color:#475569;line-height:1.6;">Take a breath, get comfortable, and be ready a few minutes early. See you in class!</p></div>' +
+    '<div style="padding:16px 28px;background:#f8fafc;color:#64748b;font-size:12px;">This reminder was sent automatically for your scheduled lesson.</div></div></div>';
+  return sendRichEmail_(recipient, subject, body, html, teacherName + ' Arabic Lessons');
+}
+
+function sendTeacherLessonReminderEmail_(recipient, details) {
+  return sendPlainEmail_(recipient, 'Reminder: lesson with ' + (details.name || 'Student') + ' starts soon', [
+    'Your lesson starts in about 15 minutes.', '',
+    'Student: ' + (details.name || ''),
+    'Student email: ' + (details.email || ''),
+    'Date & time: ' + (details.slotLabel || ''),
+    'Timezone: ' + (details.timeZone || ''),
+    'Booking ID: ' + (details.bookingId || ''),
+    details.meetingUrl ? 'Join lesson: ' + details.meetingUrl : '', '',
+    'Open the teacher dashboard for the current lesson details.'
+  ].join('\n'));
 }
 
 function normalizeCalendarId_(value) {
@@ -778,13 +852,15 @@ function notificationRetryAt_(attempts) {
   return Date.now() + Math.min(1440, Math.pow(2, Math.min(10, Math.max(0, Number(attempts || 0))))) * 60000;
 }
 
-function notificationSummaryPrefix_(recipientType) {
+function notificationSummaryPrefix_(recipientType, jobId) {
+  const reminder = String(jobId || '').indexOf('_reminder_') !== -1;
+  if (reminder) return recipientType === 'teacher' ? 'teacherReminderNotification' : 'studentReminderNotification';
   return recipientType === 'teacher' ? 'teacherNotification' : 'studentNotification';
 }
 
 function patchNotificationState_(config, jobId, bookingId, recipientType, values) {
   firestoreIamPatch_(config, 'notificationJobs', jobId, values);
-  const prefix = notificationSummaryPrefix_(recipientType);
+  const prefix = notificationSummaryPrefix_(recipientType, jobId);
   const summary = {};
   Object.keys(values).forEach(function (key) {
     const suffixes = { state: 'Status', attempts: 'Attempts', lastAttemptAt: 'LastAttemptAt', nextRetryAt: 'NextRetryAt', lastError: 'LastError', sentAt: 'SentAt' };
@@ -806,6 +882,8 @@ function notificationDetails_(config, bookingId, booking, job) {
     durationMinutes: Math.max(1, fsNumber_(booking, 'durationMinutes') || 50),
     timeZone: timeZone,
     meetingUrl: fsString_(booking, 'meetingUrl'),
+    siteUrl: config.siteUrl,
+    teacherName: config.teacherName,
     lessonType: fsBool_(booking, 'isFreeTrial') ? 'Free trial' : 'Paid lesson',
     actor: fsString_(job, 'actor') || 'system',
     canceledBy: fsString_(job, 'actor') || 'system'
@@ -837,6 +915,17 @@ function deliverNotificationJob_(config, job, booking) {
     patchNotificationState_(config, jobId, bookingId, recipientType, { state: 'skipped', nextRetryAt: 0, lastError: 'Superseded by a newer reschedule.' });
     return { state: 'skipped', attempted: false };
   }
+  if (type === 'reminder') {
+    const bookingStatus = fsString_(booking, 'status') || 'booked';
+    if (bookingStatus === 'canceled' || bookingStatus === 'completed' || fsNumber_(booking, 'slot') !== fsNumber_(job, 'operationVersion') || now >= fsNumber_(booking, 'slot')) {
+      patchNotificationState_(config, jobId, bookingId, recipientType, { state: 'skipped', nextRetryAt: 0, lastError: 'Lesson was canceled, completed, or rescheduled.' });
+      return { state: 'skipped', attempted: false };
+    }
+    if (recipientType === 'teacher') {
+      patchNotificationState_(config, jobId, bookingId, recipientType, { state: 'skipped', nextRetryAt: 0, lastError: 'Teacher reminder is handled by Google Calendar.' });
+      return { state: 'skipped', attempted: false };
+    }
+  }
   if (type === 'created' && !fsString_(booking, 'meetingUrl')) return { state: state, attempted: false, waitingForMeet: true };
   const nextAttempts = attempts + 1;
   patchNotificationState_(config, jobId, bookingId, recipientType, { state: 'sending', attempts: nextAttempts, lastAttemptAt: now, nextRetryAt: 0, lastError: '' });
@@ -849,6 +938,8 @@ function deliverNotificationJob_(config, job, booking) {
     else if (type === 'reschedule') sent = sendStudentScheduleUpdateEmail_(recipient, details);
     else if (type === 'cancellation' && recipientType === 'teacher') sent = sendBookingCancellationEmail_(recipient, details);
     else if (type === 'cancellation') sent = sendStudentCancellationEmail_(recipient, details);
+    else if (type === 'reminder' && recipientType === 'teacher') sent = sendTeacherLessonReminderEmail_(recipient, details);
+    else if (type === 'reminder') sent = sendLessonReminderEmail_(recipient, details);
     else throw new Error('Unsupported notification type: ' + type + '.');
     if (!sent) throw new Error('MailApp did not accept the notification.');
     patchNotificationState_(config, jobId, bookingId, recipientType, { state: 'sent', attempts: nextAttempts, sentAt: Date.now(), lastAttemptAt: now, nextRetryAt: 0, lastError: '' });
@@ -887,7 +978,7 @@ function notificationJobId_(bookingId, type, version, recipientType) {
   }).join('_');
 }
 
-function ensureNotificationJobIam_(config, bookingId, type, version, recipientType, recipientEmail, actor) {
+function ensureNotificationJobIam_(config, bookingId, type, version, recipientType, recipientEmail, actor, dueAt) {
   const id = notificationJobId_(bookingId, type, version, recipientType);
   if (firestoreIamGetOptional_(config, 'notificationJobs', id)) return id;
   const email = normalizeEmail_(recipientEmail);
@@ -896,7 +987,7 @@ function ensureNotificationJobIam_(config, bookingId, type, version, recipientTy
     bookingId: bookingId, recipientType: recipientType, recipientEmail: email,
     notificationType: type, operationVersion: Number(version || 0), actor: actor || 'system',
     state: valid ? 'pending' : 'skipped', attempts: 0, createdAt: Date.now(), sentAt: 0,
-    lastAttemptAt: 0, nextRetryAt: valid ? Date.now() : 0,
+    lastAttemptAt: 0, nextRetryAt: valid ? Math.max(Date.now(), Number(dueAt || Date.now())) : 0,
     lastError: valid ? '' : 'Missing or invalid ' + recipientType + ' email.', idempotencyKey: id
   };
   try {
@@ -909,6 +1000,17 @@ function ensureNotificationJobIam_(config, bookingId, type, version, recipientTy
     if (!/already exists|condition/i.test(String(err && err.message || err))) throw err;
   }
   return id;
+}
+
+function ensureUpcomingReminderJobsIam_(config, bookingId, booking, now) {
+  const status = fsString_(booking, 'status') || 'booked';
+  const slot = fsNumber_(booking, 'slot');
+  if (!slot || status === 'canceled' || status === 'completed') return;
+  // The existing worker runs every ten minutes. Creating jobs only near the
+  // lesson avoids scanning/storing reminder work for distant bookings.
+  if (slot < now + 4 * 60000 || slot > now + 26 * 60000) return;
+  const dueAt = slot - 15 * 60000;
+  ensureNotificationJobIam_(config, bookingId, 'reminder', slot, 'student', fsString_(booking, 'email'), 'system', dueAt);
 }
 
 function bookingDocId_(doc) {
@@ -1142,6 +1244,7 @@ function runCalendarSyncWorker() {
         (fsNumber_(booking, 'slot') + Math.max(1, fsNumber_(booking, 'durationMinutes') || 50) * 60000);
       summary.checked += 1;
       try {
+        ensureUpcomingReminderJobsIam_(config, bookingId, booking, Date.now());
         if (status !== 'canceled') ensureBookingAccountingSnapshot_(config, bookingId, booking);
         if (status !== 'canceled' && lessonEnd > Date.now()) {
           ensureBookingClaimsIam_(config, bookingId, booking);
@@ -1806,6 +1909,52 @@ function handleRequest_(e) {
         success: sent,
         message: sent ? 'Review request email sent.' : 'Review request email was not sent.',
       });
+    }
+
+    if (action === 'notifyNewStudentSignup') {
+      const caller = verifyFirebaseCaller_(config, req.authToken);
+      const studentId = String(req.studentId || '');
+      if (!studentId || studentId !== caller.uid) {
+        return jsonOut({ success: false, message: 'Student account mismatch.' });
+      }
+      enforceCallerRateLimit_(caller, 'notifyNewStudentSignup', 10, 3600);
+      const studentDoc = firestoreFetch_(config, caller.token, '/users/' + encodeURIComponent(studentId), { method: 'get' });
+      if ((fsString_(studentDoc, 'role') || 'student') !== 'student') {
+        return jsonOut({ success: false, message: 'Only a student account can send this notification.' });
+      }
+      if (fsNumber_(studentDoc, 'teacherSignupNotificationSentAt')) {
+        return jsonOut({ success: true, alreadySent: true, message: 'Teacher was already notified.' });
+      }
+      const email = fsString_(studentDoc, 'email') || caller.email;
+      const name = fsString_(studentDoc, 'name') || 'Student';
+      const phone = fsString_(studentDoc, 'phone');
+      const teacherEmail = normalizeEmail_(config.notificationEmail || config.firebaseTeacherEmail);
+      if (!isValidEmail_(teacherEmail)) return jsonOut({ success: false, message: 'Teacher notification email is not configured.' });
+      const sent = sendNewStudentSignupEmail_(teacherEmail, {
+        name: name, email: email, phone: phone,
+        teacherName: config.teacherName,
+        dashboardUrl: config.siteUrl + (config.siteUrl.indexOf('?') === -1 ? '?teacher=1' : '&teacher=1')
+      });
+      if (sent) firestoreIamPatch_(config, 'users', studentId, { teacherSignupNotificationSentAt: Date.now(), updatedAt: Date.now() });
+      return jsonOut({ success: sent, message: sent ? 'Teacher notified about the new account.' : 'Teacher notification was not sent.' });
+    }
+
+    if (action === 'sendStudentBookingInvitation') {
+      const caller = requireTeacherCaller_(config, req.authToken);
+      enforceCallerRateLimit_(caller, 'sendStudentBookingInvitation', 60, 3600);
+      const studentId = String(req.studentId || '');
+      if (!studentId) return jsonOut({ success: false, message: 'Choose a student first.' });
+      const studentDoc = firestoreFetch_(config, caller.token, '/users/' + encodeURIComponent(studentId), { method: 'get' });
+      const email = fsString_(studentDoc, 'email');
+      const name = fsString_(studentDoc, 'name') || 'Student';
+      if (!isValidEmail_(email)) return jsonOut({ success: false, message: 'The student does not have a valid email.' });
+      const sent = sendStudentBookingInvitationEmail_(email, { name: name, teacherName: config.teacherName, siteUrl: config.siteUrl });
+      if (sent) firestoreIamPatch_(config, 'users', studentId, {
+        lastBookingInvitationEmailAt: Date.now(),
+        lastBookingInvitationEmailBy: caller.uid,
+        updatedAt: Date.now()
+      });
+      return jsonOut({ success: sent, message: sent ? 'Lesson invitation email sent.' : 'Lesson invitation email was not sent.' });
     }
 
     if (action === 'createBooking') {

@@ -4797,3 +4797,10 @@ main.site-shell {
         flex-direction: column;
     }
 }
+.student-admin-editor__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
