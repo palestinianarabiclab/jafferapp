@@ -566,8 +566,7 @@ service cloud.firestore {
         );
 
        allow read: if isTeacher() ||
-        (signedIn() && (resource.data.studentUid == request.auth.uid || resource.data.email == request.auth.token.email) &&
-          !resource.data.keys().hasAny(['lessonPrice', 'chargedAmount']));
+        (signedIn() && (resource.data.studentUid == request.auth.uid || resource.data.email == request.auth.token.email));
 
       allow update: if (
         isTeacher() &&

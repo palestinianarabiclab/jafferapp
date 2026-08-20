@@ -2725,23 +2725,32 @@ async function cancelStudentBooking(bookingId) {
             lateChargeApplies: isLateCancel,
         }),
     }, { merge: true });
-    cancelBatch.set(window.db.collection("publicBookings").doc(bookingId), {
-        status: "canceled",
-        updatedAt: canceledAt,
-        calendarSynced: false,
-    }, { merge: true });
     await cancelBatch.commit();
 
     // Cleanup and notification delivery are deliberately separate from the core
     // cancellation. A stale legacy claim or notification permission must never
     // roll back a valid student cancellation.
+    try {
     const cleanupBatch = window.db.batch();
+    const publicRef = window.db.collection("publicBookings").doc(bookingId);
     const slotClaimIds = Array.isArray(booking.slotClaimIds) && booking.slotClaimIds.length
         ? booking.slotClaimIds
         : (booking.bookingOperationId ? [getSlotClaimId(booking.slot)] : []);
-    slotClaimIds.forEach((claimId) => cleanupBatch.delete(window.db.collection("bookingSlotClaims").doc(claimId)));
+    const slotClaimRefs = slotClaimIds.map((claimId) => window.db.collection("bookingSlotClaims").doc(claimId));
+    const [publicSnap, ...slotClaimSnaps] = await Promise.all([
+        publicRef.get(),
+        ...slotClaimRefs.map((ref) => ref.get()),
+    ]);
+    if (publicSnap.exists) {
+        cleanupBatch.set(publicRef, { status: "canceled", updatedAt: canceledAt, calendarSynced: false }, { merge: true });
+    }
+    slotClaimSnaps.forEach((claimSnap) => { if (claimSnap.exists) cleanupBatch.delete(claimSnap.ref); });
     if (booking.reservationClaimId) {
-        if (!isLateCancel) cleanupBatch.delete(window.db.collection("lessonCreditClaims").doc(booking.reservationClaimId));
+        if (!isLateCancel) {
+            const reservationClaimRef = window.db.collection("lessonCreditClaims").doc(booking.reservationClaimId);
+            const reservationClaimSnap = await reservationClaimRef.get();
+            if (reservationClaimSnap.exists) cleanupBatch.delete(reservationClaimRef);
+        }
     } else if (booking.isFreeTrial !== true) {
         const claimSnap = await window.db.collection("lessonCreditClaims")
             .where("studentUid", "==", booking.studentUid)
@@ -2756,9 +2765,14 @@ async function cancelStudentBooking(bookingId) {
             trialUsedAt: window.firebase.firestore.FieldValue.delete(),
             updatedAt: window.firebase.firestore.FieldValue.serverTimestamp(),
         }, { merge: true });
-        cleanupBatch.delete(window.db.collection("trialClaims").doc(booking.studentUid));
+        const trialClaimRef = window.db.collection("trialClaims").doc(booking.studentUid);
+        const trialClaimSnap = await trialClaimRef.get();
+        if (trialClaimSnap.exists) cleanupBatch.delete(trialClaimRef);
     }
-    await cleanupBatch.commit().catch((error) => console.warn("Cancellation cleanup will be retried by reconciliation.", error));
+    await cleanupBatch.commit();
+    } catch (error) {
+        console.warn("Cancellation cleanup will be retried by reconciliation.", error);
+    }
     try {
         const notificationBatch = window.db.batch();
         const cancellationJobs = createEventNotificationJobs(
