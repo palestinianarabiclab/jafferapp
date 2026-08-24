@@ -164,24 +164,103 @@ function sendBookingCancellationEmail_(recipient, details) {
   return sendPlainEmail_(recipient, subject, body);
 }
 
+function formatEmailSlot_(slot, timeZone) {
+  if (!slot) return '';
+  try {
+    return Utilities.formatDate(new Date(slot), timeZone || 'UTC', 'EEE, MMM d, yyyy · h:mm a');
+  } catch (error) {
+    return Utilities.formatDate(new Date(slot), 'UTC', 'EEE, MMM d, yyyy · h:mm a') + ' UTC';
+  }
+}
+
+function buildGoogleCalendarUrl_(details) {
+  const slot = Number(details.slot || 0);
+  const durationMinutes = Math.max(1, Number(details.durationMinutes || 50));
+  if (!slot) return '';
+  const start = Utilities.formatDate(new Date(slot), 'UTC', "yyyyMMdd'T'HHmmss'Z'");
+  const end = Utilities.formatDate(new Date(slot + durationMinutes * 60000), 'UTC', "yyyyMMdd'T'HHmmss'Z'");
+  const teacherName = details.teacherName || 'Your teacher';
+  const description = ['Your Arabic lesson with ' + teacherName + '.', details.meetingUrl ? 'Join Google Meet: ' + details.meetingUrl : '', details.siteUrl ? 'Open your student account: ' + details.siteUrl : '', details.bookingId ? 'Booking ID: ' + details.bookingId : ''].filter(Boolean).join('\n\n');
+  return 'https://calendar.google.com/calendar/render?action=TEMPLATE' +
+    '&text=' + encodeURIComponent('Arabic lesson with ' + teacherName) +
+    '&dates=' + encodeURIComponent(start + '/' + end) +
+    '&details=' + encodeURIComponent(description) +
+    (details.meetingUrl ? '&location=' + encodeURIComponent(details.meetingUrl) : '');
+}
+
+function sendStudentConfirmationEmailLegacy_(recipient, details) {
+  const teacherName = details.teacherName || 'Your teacher';
+  const studentName = details.name || 'Student';
+  const studentTimeZone = details.studentTimeZone || details.timeZone || 'UTC';
+  const studentSlotLabel = details.studentSlotLabel || formatEmailSlot_(details.slot, studentTimeZone);
+  const teacherSlotLabel = details.teacherSlotLabel || formatEmailSlot_(details.slot, details.timeZone || 'UTC');
+  const calendarUrl = safeEmailUrl_(buildGoogleCalendarUrl_(details));
+  const meetingUrl = safeEmailUrl_(details.meetingUrl);
+  const siteUrl = safeEmailUrl_(details.siteUrl);
+  const subject = 'Your Arabic lesson with ' + teacherName + ' is confirmed';
+  const body = ['Hi ' + studentName + ',', '', 'Great news—your Arabic lesson is confirmed!', '', 'Your local date & time: ' + studentSlotLabel, 'Your timezone: ' + studentTimeZone, 'Duration: ' + (details.durationMinutes || 50) + ' minutes', details.timeZone && details.timeZone !== studentTimeZone ? 'Teacher time: ' + teacherSlotLabel + ' (' + details.timeZone + ')' : '', calendarUrl ? 'Add to Google Calendar: ' + calendarUrl : '', meetingUrl ? 'Join lesson: ' + meetingUrl : '', siteUrl ? 'Open your student account: ' + siteUrl : '', '', 'Keep showing up, keep speaking, and enjoy every step of your Arabic journey.', 'See you soon!', teacherName].filter(Boolean).join('\n');
+  const button = function (url, label, background) {
+    return url ? '<a href="' + escapeEmailHtml_(url) + '" style="display:inline-block;margin:6px 6px 6px 0;padding:14px 20px;border-radius:10px;background:' + background + ';color:#ffffff;text-decoration:none;font-family:Arial,sans-serif;font-weight:700;">' + label + '</a>' : '';
+  };
+  const html = '<div style="margin:0;padding:24px;background:#f4f1ea;font-family:Arial,sans-serif;color:#172033;"><div style="max-width:640px;margin:auto;overflow:hidden;border:1px solid #ded8ca;border-radius:20px;background:#ffffff;box-shadow:0 10px 30px rgba(23,32,51,.10);"><div style="padding:34px 28px;background:linear-gradient(145deg,#111827 0%,#0f766e 52%,#15803d 78%,#b91c1c 100%);color:#ffffff;text-align:center;"><div style="font-size:13px;font-weight:700;letter-spacing:1.8px;text-transform:uppercase;opacity:.88;">Booking confirmed</div><div style="margin-top:10px;font-size:30px;font-weight:800;line-height:1.2;">Your Arabic lesson is ready</div><div style="width:72px;height:4px;margin:19px auto 0;border-radius:4px;background:#ffffff;"></div></div><div style="padding:30px;"><p style="margin:0 0 15px;font-size:18px;">Hi <strong>' + escapeEmailHtml_(studentName) + '</strong>,</p><p style="margin:0 0 20px;line-height:1.7;color:#475569;">Great news—your lesson with <strong>' + escapeEmailHtml_(teacherName) + '</strong> is confirmed. Every lesson is another step toward speaking Arabic with more confidence.</p><div style="padding:19px;border-radius:14px;background:#f0fdfa;border:1px solid #99f6e4;border-left:5px solid #0f766e;"><div style="font-size:12px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:#0f766e;">Your local lesson time</div><div style="margin-top:7px;font-size:21px;font-weight:800;color:#172033;">' + escapeEmailHtml_(studentSlotLabel) + '</div><div style="margin-top:6px;color:#64748b;">' + escapeEmailHtml_(studentTimeZone) + ' · ' + escapeEmailHtml_(String(details.durationMinutes || 50)) + ' minutes</div></div>' + (details.timeZone && details.timeZone !== studentTimeZone ? '<p style="margin:11px 2px 0;color:#64748b;font-size:13px;">Teacher time: ' + escapeEmailHtml_(teacherSlotLabel) + ' (' + escapeEmailHtml_(details.timeZone) + ')</p>' : '') + '<div style="margin-top:22px;">' + button(calendarUrl, 'Add to Google Calendar', '#2563eb') + button(meetingUrl, 'Join Google Meet', '#0f766e') + button(siteUrl, 'Open Student Website', '#c2410c') + '</div><p style="margin:25px 0 0;line-height:1.7;color:#475569;">Keep showing up, keep speaking, and enjoy every step of your Arabic journey. We look forward to seeing you!</p><p style="margin:18px 0 0;color:#475569;">Warmly,<br><strong>' + escapeEmailHtml_(teacherName) + '</strong></p></div><div style="padding:16px 30px;background:#f8fafc;color:#64748b;font-size:12px;text-align:center;">Palestinian Arabic · Real conversations · Learning with confidence</div></div></div>';
+  return sendRichEmail_(recipient, subject, body, html, teacherName + ' Arabic Lessons');
+}
+
+
 function sendStudentConfirmationEmail_(recipient, details) {
-  const subject = 'Your lesson booking is confirmed';
+  const teacherName = details.teacherName || 'Your teacher';
+  const studentName = details.name || 'Student';
+  const studentTimeZone = details.studentTimeZone || details.timeZone || 'UTC';
+  const studentSlotLabel = details.studentSlotLabel || formatEmailSlot_(details.slot, studentTimeZone);
+  const teacherSlotLabel = details.teacherSlotLabel || formatEmailSlot_(details.slot, details.timeZone || 'UTC');
+  const calendarUrl = safeEmailUrl_(buildGoogleCalendarUrl_(details));
+  const meetingUrl = safeEmailUrl_(details.meetingUrl);
+  const siteUrl = safeEmailUrl_(details.siteUrl);
+  const subject = 'Your Arabic lesson with ' + teacherName + ' is confirmed';
   const body = [
-    'Hello ' + (details.name || 'Student') + ',',
-    '',
-    'Your lesson has been booked successfully.',
-    '',
-    'Date & time: ' + (details.slotLabel || ''),
+    'Hi ' + studentName + ',', '',
+    'Great news - your Arabic lesson is confirmed!', '',
+    'Your local date and time: ' + studentSlotLabel,
+    'Your timezone: ' + studentTimeZone,
     'Duration: ' + (details.durationMinutes || 50) + ' minutes',
-    'Teacher timezone: ' + (details.timeZone || ''),
-    'Booking ID: ' + (details.bookingId || ''),
-    details.meetingUrl ? 'Join lesson: ' + details.meetingUrl : '',
-    '',
-    'If you need to change the booking, please reply to this email or contact us on WhatsApp.',
-    '',
-    'Thank you.'
-  ].join('\n');
-  return sendPlainEmail_(recipient, subject, body);
+    details.timeZone && details.timeZone !== studentTimeZone ? 'Teacher time: ' + teacherSlotLabel + ' (' + details.timeZone + ')' : '',
+    calendarUrl ? 'Google Calendar: ' + calendarUrl : '',
+    meetingUrl ? 'Join lesson: ' + meetingUrl : '',
+    siteUrl ? 'Student website: ' + siteUrl : '', '',
+    'Keep showing up, keep speaking, and enjoy every step of your Arabic journey.',
+    'See you soon!', teacherName
+  ].filter(Boolean).join('\n');
+  const actionButton = function (url, label, background) {
+    return url ? '<a href="' + escapeEmailHtml_(url) + '" style="display:inline-block;margin:0 6px 8px 0;padding:13px 18px;border-radius:8px;background-color:' + background + ';color:#ffffff;text-decoration:none;font-family:Arial,sans-serif;font-size:14px;font-weight:bold;">' + label + '</a>' : '';
+  };
+  const teacherTimeRow = details.timeZone && details.timeZone !== studentTimeZone
+    ? '<tr><td style="padding:0 0 18px;color:#64748b;font-family:Arial,sans-serif;font-size:13px;">Teacher time: ' + escapeEmailHtml_(teacherSlotLabel) + ' (' + escapeEmailHtml_(details.timeZone) + ')</td></tr>'
+    : '';
+  const html = '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f4f1ea" style="width:100%;margin:0;background-color:#f4f1ea;"><tr><td align="center" style="padding:20px 10px;">' +
+    '<table role="presentation" width="620" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="width:100%;max-width:620px;background-color:#ffffff;border:1px solid #ded8ca;">' +
+    '<tr><td style="height:5px;line-height:5px;font-size:0;background-color:#111827;">&nbsp;</td></tr>' +
+    '<tr><td align="center" bgcolor="#0f766e" style="padding:25px 22px;background-color:#0f766e;color:#ffffff;font-family:Arial,sans-serif;">' +
+    '<div style="font-size:12px;font-weight:bold;letter-spacing:1.5px;text-transform:uppercase;">Booking confirmed</div>' +
+    '<div style="padding-top:8px;font-size:27px;font-weight:bold;line-height:1.25;">Your Arabic lesson is ready</div>' +
+    '<div style="padding-top:8px;font-size:15px;">Arabic - conversation - confidence</div></td></tr>' +
+    '<tr><td style="height:5px;line-height:5px;font-size:0;background-color:#b91c1c;">&nbsp;</td></tr>' +
+    '<tr><td style="padding:28px 26px;font-family:Arial,sans-serif;color:#172033;">' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">' +
+    '<tr><td style="padding:0 0 14px;font-size:18px;">Hi <strong>' + escapeEmailHtml_(studentName) + '</strong>,</td></tr>' +
+    '<tr><td style="padding:0 0 20px;color:#475569;font-size:16px;line-height:1.65;">Great news - your lesson with <strong>' + escapeEmailHtml_(teacherName) + '</strong> is confirmed. Every lesson is another step toward speaking Arabic with more confidence.</td></tr>' +
+    '<tr><td bgcolor="#f0fdfa" style="padding:18px;background-color:#f0fdfa;border:1px solid #99f6e4;border-left:5px solid #0f766e;">' +
+    '<div style="color:#0f766e;font-size:12px;font-weight:bold;letter-spacing:1px;text-transform:uppercase;">Your local lesson time</div>' +
+    '<div style="padding-top:7px;color:#172033;font-size:21px;font-weight:bold;line-height:1.35;">' + escapeEmailHtml_(studentSlotLabel) + '</div>' +
+    '<div style="padding-top:6px;color:#64748b;font-size:14px;">' + escapeEmailHtml_(studentTimeZone) + ' | ' + escapeEmailHtml_(String(details.durationMinutes || 50)) + ' minutes</div></td></tr>' +
+    '<tr><td style="height:11px;line-height:11px;font-size:0;">&nbsp;</td></tr>' + teacherTimeRow +
+    '<tr><td style="padding:0 0 8px;">' + actionButton(calendarUrl, 'Add to Google Calendar', '#2563eb') + actionButton(meetingUrl, 'Join Google Meet', '#0f766e') + actionButton(siteUrl, 'Open Student Website', '#c2410c') + '</td></tr>' +
+    '<tr><td style="padding:8px 0 0;color:#475569;font-size:15px;line-height:1.65;">Use <strong>Add to Google Calendar</strong> above if you would like this lesson saved to your calendar.</td></tr>' +
+    '<tr><td style="padding:20px 0 0;color:#475569;font-size:15px;line-height:1.65;">Keep showing up, keep speaking, and enjoy every step of your Arabic journey. We look forward to seeing you!</td></tr>' +
+    '<tr><td style="padding:17px 0 0;color:#475569;font-size:15px;">Warmly,<br><strong>' + escapeEmailHtml_(teacherName) + '</strong></td></tr>' +
+    '</table></td></tr>' +
+    '<tr><td align="center" bgcolor="#f8fafc" style="padding:15px 20px;background-color:#f8fafc;color:#64748b;font-family:Arial,sans-serif;font-size:12px;">Palestinian Arabic | Real conversations | Learning with confidence</td></tr>' +
+    '</table></td></tr></table>';
+  return sendRichEmail_(recipient, subject, body, html, teacherName + ' Arabic Lessons');
 }
 
 function sendStudentScheduleUpdateEmail_(recipient, details) {
@@ -882,6 +961,7 @@ function patchNotificationState_(config, jobId, bookingId, recipientType, values
 function notificationDetails_(config, bookingId, booking, job) {
   const slot = fsNumber_(booking, 'slot');
   const timeZone = fsString_(booking, 'timezone') || config.defaultTimeZone;
+  const studentTimeZone = fsString_(booking, 'studentTimeZone') || timeZone;
   return {
     bookingId: bookingId,
     name: fsString_(booking, 'name') || 'Student',
@@ -889,6 +969,10 @@ function notificationDetails_(config, bookingId, booking, job) {
     phone: fsString_(booking, 'phone'),
     notes: fsString_(booking, 'notes'),
     slotLabel: slot ? Utilities.formatDate(new Date(slot), timeZone, 'yyyy-MM-dd HH:mm') : '',
+    slot: slot,
+    studentTimeZone: studentTimeZone,
+    studentSlotLabel: formatEmailSlot_(slot, studentTimeZone),
+    teacherSlotLabel: formatEmailSlot_(slot, timeZone),
     durationMinutes: Math.max(1, fsNumber_(booking, 'durationMinutes') || 50),
     timeZone: timeZone,
     meetingUrl: fsString_(booking, 'meetingUrl'),

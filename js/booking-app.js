@@ -11,7 +11,7 @@ import {
 } from "./logic/contactSettingsStore.js";
 import {
     submitGuestBooking,
-} from "./logic/guestBookingFlow.js?v=20260808-phase45-accounting-performance-v1";
+} from "./logic/guestBookingFlow.js?v=20260824-six-hour-booking-v1";
 import {
     renderTeacherBookings,
     cancelBooking,
