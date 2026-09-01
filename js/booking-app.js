@@ -8842,6 +8842,9 @@ function wireTeacherActions() {
             const student = state.studentCache.get(studentId) || {};
             if (!studentId || amount <= 0) { setStatus(els.teacherStudentsMsg, "Enter an amount greater than zero.", "error"); return; }
             const effectiveLessonPrice = toMoneyValue(form?.querySelector("[data-student-price]")?.value) || getConfiguredLessonPrice();
+            const paymentLessons = isPayment && effectiveLessonPrice > 0
+                ? Math.max(0, Math.floor((amount + 0.0001) / effectiveLessonPrice))
+                : 0;
             const restoredLessons = isPayment || effectiveLessonPrice <= 0 ? 0 : Math.max(0, Math.floor((amount + 0.0001) / effectiveLessonPrice));
             if (!isPayment && restoredLessons < 1) {
                 setStatus(els.teacherStudentsMsg, `Refund must be at least one lesson price (${formatMoney(effectiveLessonPrice)}) to restore a lesson.`, "error");
@@ -8856,12 +8859,12 @@ function wireTeacherActions() {
                     courseAccessRequested: student.courseAccessRequested === true,
                     allowOverdraft: student.allowOverdraft === true,
                     reviewRequested: student.reviewRequested === true,
-                    lessonCredits: isPayment ? Number(student.lessonCredits || 0) : Number(student.lessonCredits || 0) + restoredLessons,
-                    lessonCreditAdjustment: isPayment ? 0 : restoredLessons,
+                    lessonCredits: Number(student.lessonCredits || 0) + (isPayment ? paymentLessons : restoredLessons),
+                    lessonCreditAdjustment: isPayment ? paymentLessons : restoredLessons,
                     adjustmentType: isPayment ? "payment" : "refund",
                 });
                 await refreshTeacherStudents();
-                setStatus(els.teacherStudentsMsg, `${isPayment ? "Payment added" : `Credit returned and ${restoredLessons} lesson${restoredLessons === 1 ? "" : "s"} restored`}. New balance: ${formatMoney(toMoneyValue(student.balance) + amount)}.`, "success");
+                setStatus(els.teacherStudentsMsg, `${isPayment ? `Payment added and ${paymentLessons} lesson${paymentLessons === 1 ? "" : "s"} credited` : `Credit returned and ${restoredLessons} lesson${restoredLessons === 1 ? "" : "s"} restored`}. New balance: ${formatMoney(toMoneyValue(student.balance) + amount)}.`, "success");
             }).catch((error) => setStatus(els.teacherStudentsMsg, error.message || "Could not update balance.", "error"));
             return;
         }

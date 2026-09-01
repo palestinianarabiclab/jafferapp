@@ -31,8 +31,12 @@ test("teacher can set the student's exact lesson-credit count", () => {
 });
 test("a refund restores whole lessons using the student's effective lesson price", () => {
     assert.match(app, /Math\.floor\(\(amount \+ 0\.0001\) \/ effectiveLessonPrice\)/);
-    assert.match(app, /lessonCreditAdjustment:\s*isPayment \? 0 : restoredLessons/);
+    assert.match(app, /lessonCreditAdjustment:\s*isPayment \? paymentLessons : restoredLessons/);
     assert.match(app, /lessonCreditsAfter/);
+});
+test("manual payments add whole lesson credits using the effective lesson price", () => {
+    assert.match(app, /const paymentLessons = isPayment && effectiveLessonPrice > 0/);
+    assert.match(app, /lessonCredits:\s*Number\(student\.lessonCredits \|\| 0\) \+ \(isPayment \? paymentLessons : restoredLessons\)/);
 });
 test("Regular Rate Display remains public and is not replaced by a fixed private-pricing message", () => {
     assert.doesNotMatch(app, /Private lesson pricing is managed by the teacher/);
