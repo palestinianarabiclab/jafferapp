@@ -38,6 +38,11 @@ test("manual payments add whole lesson credits using the effective lesson price"
     assert.match(app, /const paymentLessons = isPayment && effectiveLessonPrice > 0/);
     assert.match(app, /lessonCredits:\s*Number\(student\.lessonCredits \|\| 0\) \+ \(isPayment \? paymentLessons : restoredLessons\)/);
 });
+test("approved package credit repair adds missing lessons without adding another payment", () => {
+    assert.match(app, /function repairApprovedPackageCredits/);
+    assert.match(app, /data-student-action="repair-package-credits"/);
+    assert.match(app, /paymentAmount:\s*0/);
+});
 test("Regular Rate Display remains public and is not replaced by a fixed private-pricing message", () => {
     assert.doesNotMatch(app, /Private lesson pricing is managed by the teacher/);
     assert.match(app, /lessonRateDisplay\.textContent = rateText/);

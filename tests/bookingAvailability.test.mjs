@@ -11,11 +11,11 @@ import {
     zonedDateTimeToUtcMs,
 } from "../js/logic/bookingAvailability.js";
 
-test("student booking requires a six-hour lead", () => {
+test("student booking requires a 30-minute lead", () => {
     const now = Date.UTC(2026, 6, 24, 10, 0);
-    assert.equal(MIN_BOOKING_LEAD_MINUTES, 360);
-    assert.equal(isSlotBeyondMinimumLead(now + 359 * 60000, now), false);
-    assert.equal(isSlotBeyondMinimumLead(now + 360 * 60000, now), true);
+    assert.equal(MIN_BOOKING_LEAD_MINUTES, 30);
+    assert.equal(isSlotBeyondMinimumLead(now + 29 * 60000, now), false);
+    assert.equal(isSlotBeyondMinimumLead(now + 30 * 60000, now), true);
 });
 
 test("toMinutes parses valid times", () => {

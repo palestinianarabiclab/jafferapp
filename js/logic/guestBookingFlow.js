@@ -92,7 +92,7 @@ export async function submitGuestBooking({
     const selectedSlot = Number(selectedSlotMs || 0);
     const slotDate = selectedSlot ? new Date(selectedSlot) : null;
     if (!isSlotBeyondMinimumLead(selectedSlot)) {
-        if (bookingMsg) bookingMsg.textContent = "Please choose a time at least 6 hours from now.";
+        if (bookingMsg) bookingMsg.textContent = "Please choose a time at least 30 minutes from now.";
         return;
     }
 

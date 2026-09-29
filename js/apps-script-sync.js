@@ -34,9 +34,11 @@ function toQueryString(payload) {
     ).toString();
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = 30000) {
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+    const timeoutId = window.setTimeout(() => {
+        controller.abort(new DOMException("Apps Script request timed out", "TimeoutError"));
+    }, timeoutMs);
     try {
         return await fetch(url, {
             ...options,
@@ -105,11 +107,14 @@ async function callAppsScript(action, payload = {}, { allowGet = false } = {}) {
                     headers: { "Content-Type": "text/plain;charset=utf-8" },
                     body: JSON.stringify(body),
                 },
-            allowGet ? 15000 : 30000
+            allowGet ? 30000 : 60000
         );
         return parseAppsScriptResponse(res);
     } catch (err) {
-        return { success: false, message: err?.message || String(err) };
+        const message = err?.name === "AbortError" || err?.name === "TimeoutError"
+            ? "Apps Script request timed out. Please try again."
+            : (err?.message || String(err));
+        return { success: false, aborted: err?.name === "AbortError" || err?.name === "TimeoutError", message };
     }
 }
 

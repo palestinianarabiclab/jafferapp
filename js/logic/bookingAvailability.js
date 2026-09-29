@@ -1,4 +1,4 @@
-export const MIN_BOOKING_LEAD_MINUTES = 6 * 60;
+export const MIN_BOOKING_LEAD_MINUTES = 30;
 
 export function isSlotBeyondMinimumLead(
     slotStartMs,
