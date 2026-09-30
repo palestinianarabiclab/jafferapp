@@ -5940,9 +5940,11 @@ async function syncPublicStudentCounts(students = state.studentsCache) {
     const currentRegistered = parseProfileCounter(state.profileSettings?.registeredStudentsCount, -1);
     const currentActive = parseProfileCounter(state.profileSettings?.activeStudentsCount ?? state.profileSettings?.studentsCount, -1);
     if (currentRegistered === registeredCount && currentActive === activeCount) return false;
-    state.profileSettings = { ...state.profileSettings, registeredStudentsCount: String(registeredCount), activeStudentsCount: String(activeCount), studentsCount: String(activeCount) };
+    const profilePatch = { registeredStudentsCount: String(registeredCount), activeStudentsCount: String(activeCount) };
+    if (state.profileSettings?.studentsCountManual !== true) profilePatch.studentsCount = String(activeCount);
+    state.profileSettings = { ...state.profileSettings, ...profilePatch };
     await window.db.collection("teacherProfile").doc("primary").set({
-        registeredStudentsCount: String(registeredCount), activeStudentsCount: String(activeCount), studentsCount: String(activeCount), studentCountsUpdatedAt: Date.now(),
+        ...profilePatch, studentCountsUpdatedAt: Date.now(),
     }, { merge: true });
     saveLocalProfileSettings("teacher_profile_v1", state.profileSettings);
     renderProfileUi();
@@ -8116,7 +8118,8 @@ function wireTeacherActions() {
                     avatarUrl: (els.teacherProfileAvatarUrlInput?.value || "").trim(),
                     videoUrl: (els.teacherProfileVideoUrlInput?.value || "").trim(),
                     hoursTaught: (els.teacherProfileHoursInput?.value || "").trim() || "1,200+",
-                    studentsCount: (els.teacherProfileStudentsInput?.value || "").trim() || "85+",
+                    studentsCount: (els.teacherProfileStudentsInput?.value || "").trim() || state.profileSettings?.studentsCount || "85+",
+                    studentsCountManual: true,
                     quoteArabic: (els.teacherProfileQuoteInput?.value || "").trim(),
                     bioText: (els.teacherProfileBioInput?.value || "").trim(),
                 };
