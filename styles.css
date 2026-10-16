@@ -964,12 +964,16 @@ main.site-shell {
 .student-admin-item__summary:hover { background: rgba(15, 118, 110, 0.035); }
 .student-admin-item__identity { display: flex; align-items: center; gap: 12px; min-width: 190px; }
 .student-admin-item__avatar { display: grid !important; place-items: center; flex: 0 0 42px; width: 42px; height: 42px; border-radius: 13px; background: linear-gradient(135deg, var(--primary), var(--primary-dark)); color: #fff !important; font-size: 1rem !important; font-weight: 800; }
-.student-admin-metrics { display: flex !important; justify-content: flex-end; gap: 8px; flex: 1; }
+.student-admin-metrics { display: grid !important; grid-template-columns: repeat(4, minmax(86px, 1fr)); justify-content: flex-end; gap: 8px; flex: 1; }
 .student-admin-metric { display: grid !important; min-width: 82px; padding: 7px 10px; border-radius: 11px; background: var(--bg-soft); text-align: center; }
 .student-admin-metric small { color: var(--muted); font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
 .student-admin-metric strong { color: var(--ink); font-size: 0.92rem; }
 .student-admin-metric--status strong { color: var(--primary-dark); text-transform: capitalize; }
 .student-admin-item__chevron { color: var(--primary-dark); font-size: 1.3rem; }
+.student-admin-item .student-finance-card { min-width: 0; }
+.student-admin-item [data-student-package-lessons], .student-admin-item [data-student-package-price] { display: inline-block; width: calc(50% - 4px); }
+.student-admin-item [data-student-package-price] { margin-left: 4px; }
+.student-admin-item .student-finance-card--detail small { display: block; line-height: 1.35; }
 .student-admin-editor { padding: 18px; border-top: 1px solid var(--line); background: rgba(248, 250, 252, 0.7); }
 .student-admin-editor__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .student-admin-editor__head strong, .student-admin-editor__head span { display: block; }
@@ -1006,6 +1010,7 @@ main.site-shell {
 .dashboard[hidden] {
     display: none;
 }
+@media (max-width: 1100px) { .student-admin-item .student-finance-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 .teacher-editor__section {
     border: 1px solid var(--line);

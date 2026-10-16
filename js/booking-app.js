@@ -7345,12 +7345,12 @@ async function refreshTeacherStudents() {
 
                         <div class="student-finance-grid">
                             <label class="field student-finance-card student-finance-card--payment">
-                                <span>Payment Received (+$)</span>
+                                <span>Payment Received (+$)<small>Paid money; adds balance and lessons.</small></span>
                                 <input data-student-add-payment type="number" min="0" step="0.01" placeholder="100" />
                                 <button class="btn btn--primary btn--small" type="button" data-student-action="add-payment" data-student-id="${escapeHtml(student.id)}">Add Payment</button>
                             </label>
                             <label class="field student-finance-card student-finance-card--refund">
-                                <span>Return Credit / Refund (+$)</span>
+                                <span>Return Credit / Refund (+$)<small>Returns value without recording a payment.</small></span>
                                 <input data-student-add-refund type="number" min="0" step="0.01" placeholder="10" />
                                 <button class="btn btn--outline btn--small" type="button" data-student-action="add-refund" data-student-id="${escapeHtml(student.id)}">Return Credit</button>
                             </label>
