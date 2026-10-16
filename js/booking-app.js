@@ -1609,7 +1609,10 @@ function updateStudentOfferUi() {
         }
     }
 
-    const pkgs = Array.isArray(offers.packages) ? offers.packages : [];
+    const assigned = state.studentProfile?.assignedPackage;
+    const pkgs = assigned && Number(assigned.lessons) > 0 && Number(assigned.price) > 0
+        ? [{ ...assigned, label: assigned.label || `${assigned.lessons} Lessons ($${assigned.price})` }]
+        : (Array.isArray(offers.packages) ? offers.packages : []);
     const stillExists = pkgs.some(p => p.lessons === state.selectedPackage?.lessons && p.price === state.selectedPackage?.price);
     if (!stillExists) state.selectedPackage = null;
 
@@ -7361,6 +7364,13 @@ async function refreshTeacherStudents() {
                                 <small>Leave at 0 to use the regular lesson price.</small>
                             </label>
                             <label class="field student-finance-card student-finance-card--detail">
+                                <span>Student Package (private)</span>
+                                <input data-student-package-label type="text" value="${escapeHtml(student.assignedPackage?.label || "")}" placeholder="e.g. 10 lessons" />
+                                <small>Only this student will see this package. Leave lessons/price empty to use public packages.</small>
+                                <input data-student-package-lessons type="number" min="1" step="1" value="${escapeHtml(student.assignedPackage?.lessons || "")}" placeholder="Lessons" />
+                                <input data-student-package-price type="number" min="0.01" step="0.01" value="${escapeHtml(student.assignedPackage?.price || "")}" placeholder="Total package price" />
+                            </label>
+                            <label class="field student-finance-card student-finance-card--detail">
                                 <span>Remaining Lessons — set exact number</span>
                                 <input data-student-lesson-credits type="number" min="0" step="1" value="${escapeHtml(remainingLessons)}" />
                                 <small>${reservedLessons} reserved · ${availableLessons} currently available</small>
@@ -7504,6 +7514,7 @@ async function saveStudentFinance(studentId, balance, lessonPrice, accessData = 
         paymentStatus: accessData.paymentStatus || "none",
         paymentNote: (accessData.paymentNote || "").trim().slice(0, 300),
         courseAccessRequested: accessData.courseAccess ? false : accessData.courseAccessRequested === true,
+        ...(accessData.assignedPackage ? { assignedPackage: accessData.assignedPackage } : {}),
         courseAccessUpdatedAt: now,
         updatedAt: window.firebase.firestore.FieldValue.serverTimestamp(),
     };
@@ -7630,6 +7641,7 @@ async function approveStudentPackage(studentId, student, packageLessons, package
         });
         transaction.set(userRef, {
             lessonCredits: currentCredits + lessons,
+            assignedPackage: { label: String(student.requestedPackage || `${lessons} lessons`).slice(0, 180), lessons, price: amount, unitPrice: amount / lessons },
             courseAccessRequested: false,
             paymentStatus: "approved",
             paymentNote: `Package approved: ${lessons} lessons for ${formatMoney(amount)}`,
@@ -9086,6 +9098,11 @@ function wireTeacherActions() {
                         allowOverdraft: allowOverdraftChecked,
                         reviewRequested: existingStudent.reviewRequested === true,
                         lessonCredits,
+                        assignedPackage: (() => {
+                            const lessons = Math.floor(Number(form.querySelector("[data-student-package-lessons]")?.value || 0));
+                            const price = toMoneyValue(form.querySelector("[data-student-package-price]")?.value);
+                            return lessons > 0 && price > 0 ? { label: (form.querySelector("[data-student-package-label]")?.value || "").trim() || `${lessons} Lessons`, lessons, price, unitPrice: price / lessons } : null;
+                        })(),
                         lessonCreditAdjustment: lessonCredits - Math.max(0, Math.floor(Number(existingStudent.lessonCredits || 0))),
                     }
                 );
