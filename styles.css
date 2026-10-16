@@ -970,6 +970,14 @@ main.site-shell {
 .student-admin-metric strong { color: var(--ink); font-size: 0.92rem; }
 .student-admin-metric--status strong { color: var(--primary-dark); text-transform: capitalize; }
 .student-admin-item__chevron { color: var(--primary-dark); font-size: 1.3rem; }
+.student-package-modal { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 20px; background: rgba(15,23,42,.45); }
+.student-package-modal__dialog { width: min(900px, 96vw); max-height: 90vh; overflow: auto; padding: 24px; border-radius: 20px; background: #fffaf3; box-shadow: 0 24px 70px rgba(15,23,42,.25); position: relative; }
+.student-package-modal__close { position:absolute; right:16px; top:12px; border:0; background:transparent; font-size:1.7rem; cursor:pointer; }
+.student-package-modal__row { display:grid; grid-template-columns: 2fr 1fr 1fr .7fr auto; gap:10px; align-items:end; padding:12px; margin:10px 0; border:1px solid var(--line); border-radius:14px; background:#fff; }
+.student-package-modal__row label { display:grid; gap:5px; font-size:.78rem; font-weight:700; color:var(--muted); }
+.student-package-modal__row input { min-width:0; }
+.student-package-modal__actions { display:flex; justify-content:space-between; gap:10px; margin-top:16px; }
+@media (max-width:700px) { .student-package-modal__row { grid-template-columns:1fr 1fr; } .student-package-modal__actions { flex-direction:column; } }
 .student-admin-item .student-finance-card { min-width: 0; }
 .student-admin-item [data-student-package-lessons], .student-admin-item [data-student-package-price] { display: inline-block; width: calc(50% - 4px); }
 .student-admin-item [data-student-package-price] { margin-left: 4px; }

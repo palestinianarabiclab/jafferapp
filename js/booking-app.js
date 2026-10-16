@@ -1609,7 +1609,7 @@ function updateStudentOfferUi() {
         }
     }
 
-    const assigned = state.studentProfile?.assignedPackage;
+    const assigned = state.studentProfile?.assignedPackages?.[0] || state.studentProfile?.assignedPackage;
     const pkgs = assigned && Number(assigned.lessons) > 0 && Number(assigned.price) > 0
         ? [{ ...assigned, label: assigned.label || `${assigned.lessons} Lessons ($${assigned.price})` }]
         : (Array.isArray(offers.packages) ? offers.packages : []);
@@ -7311,6 +7311,7 @@ async function refreshTeacherStudents() {
                             <div class="student-admin-editor__actions">
                                 <button class="btn btn--outline btn--small" type="button" data-student-action="send-booking-invitation" data-student-id="${escapeHtml(student.id)}">Send Lesson Invitation</button>
                                 <button class="btn btn--outline btn--small" type="button" data-student-action="view-lessons" data-student-id="${escapeHtml(student.id)}">View Lessons & deductions</button>
+                                <button class="btn btn--outline btn--small" type="button" data-student-action="edit-package" data-student-id="${escapeHtml(student.id)}">Edit Package</button>
                             </div>
                         </div>
                         ${accessRequested ? `
@@ -8854,7 +8855,17 @@ function wireTeacherActions() {
         }).catch((error) => setStatus(document.getElementById("studentInvitationMsg"), error.message || "Could not send the email.", "error"));
     });
 
+    function openStudentPackageEditor(studentId) {
+        const student = state.studentCache.get(studentId) || {};
+        const packages = Array.isArray(student.assignedPackages) && student.assignedPackages.length ? student.assignedPackages : (student.assignedPackage ? [student.assignedPackage] : []);
+        const modal = document.createElement("div"); modal.className = "student-package-modal modal--open";
+        modal.innerHTML = `<div class="student-package-modal__dialog"><button type="button" class="student-package-modal__close">×</button><h3>Edit Lesson Packages</h3><p class="small-note">These packages are visible only to ${escapeHtml(student.name || student.email || "this student")}.</p><div class="student-package-modal__rows">${packages.map(pkg => `<div class="student-package-modal__row"><label>Badge / Discount Label<input data-pkg-label value="${escapeHtml(pkg.label || "")}"></label><label>Lessons<input data-pkg-lessons type="number" min="1" value="${escapeHtml(pkg.lessons || 1)}"></label><label>Price (USD)<input data-pkg-price type="number" min="0.01" step="0.01" value="${escapeHtml(pkg.price || 0)}"></label><label>Popular<input data-pkg-popular type="checkbox" ${pkg.popular ? "checked" : ""}></label><button type="button" class="btn btn--danger btn--small" data-pkg-delete>Delete</button></div>`).join("")}</div><div class="student-package-modal__actions"><button type="button" class="btn btn--outline" data-pkg-add>➕ Add New Package</button><button type="button" class="btn btn--primary" data-pkg-save>Save Package</button></div></div>`;
+        document.body.appendChild(modal); const rows = modal.querySelector(".student-package-modal__rows");
+        const addRow = () => { const row = document.createElement("div"); row.className = "student-package-modal__row"; row.innerHTML = `<label>Badge / Discount Label<input data-pkg-label></label><label>Lessons<input data-pkg-lessons type="number" min="1" value="1"></label><label>Price (USD)<input data-pkg-price type="number" min="0.01" step="0.01"></label><label>Popular<input data-pkg-popular type="checkbox"></label><button type="button" class="btn btn--danger btn--small" data-pkg-delete>Delete</button>`; rows.appendChild(row); };
+        modal.addEventListener("click", async event => { if (event.target.closest(".student-package-modal__close")) modal.remove(); if (event.target.closest("[data-pkg-add]")) addRow(); if (event.target.closest("[data-pkg-delete]")) event.target.closest(".student-package-modal__row")?.remove(); if (event.target.closest("[data-pkg-save]")) { const assignedPackages = [...rows.querySelectorAll(".student-package-modal__row")].map(row => ({ label: row.querySelector("[data-pkg-label]")?.value.trim() || "Lesson Package", lessons: Math.max(1, Number(row.querySelector("[data-pkg-lessons]")?.value || 1)), price: Math.max(0.01, Number(row.querySelector("[data-pkg-price]")?.value || 0)), popular: row.querySelector("[data-pkg-popular]")?.checked === true })).filter(pkg => pkg.price > 0); if (!assignedPackages.length) return; await window.db.collection("users").doc(studentId).set({ assignedPackages, assignedPackage: assignedPackages[0], updatedAt: window.firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }); modal.remove(); await refreshTeacherStudents(); } });
+    }
     els.teacherStudentsList?.addEventListener("click", (event) => {
+        const editPackageBtn = event.target.closest("[data-student-action='edit-package']"); if (editPackageBtn) { openStudentPackageEditor(editPackageBtn.dataset.studentId); return; }
         const cancelRequestBtn = event.target.closest("[data-student-action='cancel-payment-request']");
         if (cancelRequestBtn) {
             const studentId = cancelRequestBtn.dataset.studentId || "";
