@@ -7365,13 +7365,6 @@ async function refreshTeacherStudents() {
                                 <small>Leave at 0 to use the regular lesson price.</small>
                             </label>
                             <label class="field student-finance-card student-finance-card--detail">
-                                <span>Student Package (private)</span>
-                                <input data-student-package-label type="text" value="${escapeHtml(student.assignedPackage?.label || "")}" placeholder="e.g. 10 lessons" />
-                                <small>Only this student will see this package. Leave lessons/price empty to use public packages.</small>
-                                <input data-student-package-lessons type="number" min="1" step="1" value="${escapeHtml(student.assignedPackage?.lessons || "")}" placeholder="Lessons" />
-                                <input data-student-package-price type="number" min="0.01" step="0.01" value="${escapeHtml(student.assignedPackage?.price || "")}" placeholder="Total package price" />
-                            </label>
-                            <label class="field student-finance-card student-finance-card--detail">
                                 <span>Remaining Lessons — set exact number</span>
                                 <input data-student-lesson-credits type="number" min="0" step="1" value="${escapeHtml(remainingLessons)}" />
                                 <small>${reservedLessons} reserved · ${availableLessons} currently available</small>
@@ -8857,7 +8850,8 @@ function wireTeacherActions() {
 
     function openStudentPackageEditor(studentId) {
         const student = state.studentCache.get(studentId) || {};
-        const packages = Array.isArray(student.assignedPackages) && student.assignedPackages.length ? student.assignedPackages : (student.assignedPackage ? [student.assignedPackage] : []);
+        const publicPackages = Array.isArray(state.bookingSettings?.courseOffers?.packages) ? state.bookingSettings.courseOffers.packages : [];
+        const packages = Array.isArray(student.assignedPackages) && student.assignedPackages.length ? student.assignedPackages : (student.assignedPackage ? [student.assignedPackage] : publicPackages);
         const modal = document.createElement("div"); modal.className = "student-package-modal modal--open";
         modal.innerHTML = `<div class="student-package-modal__dialog"><button type="button" class="student-package-modal__close">×</button><h3>Edit Lesson Packages</h3><p class="small-note">These packages are visible only to ${escapeHtml(student.name || student.email || "this student")}.</p><div class="student-package-modal__rows">${packages.map(pkg => `<div class="student-package-modal__row"><label>Badge / Discount Label<input data-pkg-label value="${escapeHtml(pkg.label || "")}"></label><label>Lessons<input data-pkg-lessons type="number" min="1" value="${escapeHtml(pkg.lessons || 1)}"></label><label>Price (USD)<input data-pkg-price type="number" min="0.01" step="0.01" value="${escapeHtml(pkg.price || 0)}"></label><label>Popular<input data-pkg-popular type="checkbox" ${pkg.popular ? "checked" : ""}></label><button type="button" class="btn btn--danger btn--small" data-pkg-delete>Delete</button></div>`).join("")}</div><div class="student-package-modal__actions"><button type="button" class="btn btn--outline" data-pkg-add>➕ Add New Package</button><button type="button" class="btn btn--primary" data-pkg-save>Save Package</button></div></div>`;
         document.body.appendChild(modal); const rows = modal.querySelector(".student-package-modal__rows");
