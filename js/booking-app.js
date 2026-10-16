@@ -1120,6 +1120,9 @@ function updateCourseAccessRequestUi() {
         if (!signedIn) {
             msgEl.textContent = "Sign in first to choose a package and request account credit.";
             msgEl.className = "status-line";
+        } else if (studentProfile.paymentStatus === "canceled") {
+            msgEl.textContent = "The teacher canceled or rejected this payment request. Choose another package and send a new request.";
+            msgEl.className = "status-line status-line--error";
         } else if (Number(studentProfile.lessonCredits || 0) > 0) {
             const remainingLessons = Math.max(0, Math.floor(Number(studentProfile.lessonCredits || 0)));
             msgEl.textContent = `Active lesson credits: ${remainingLessons} lesson${remainingLessons === 1 ? "" : "s"}.`;
@@ -1611,7 +1614,7 @@ function updateStudentOfferUi() {
 
     const assigned = state.studentProfile?.assignedPackages?.[0] || state.studentProfile?.assignedPackage;
     const pkgs = assigned && Number(assigned.lessons) > 0 && Number(assigned.price) > 0
-        ? [{ ...assigned, label: assigned.label || `${assigned.lessons} Lessons ($${assigned.price})` }]
+        ? [{ ...assigned, label: assigned.label || assigned.badge || `${assigned.lessons} Lessons ($${assigned.price})`, badge: assigned.badge || assigned.label || "" }]
         : (Array.isArray(offers.packages) ? offers.packages : []);
     const stillExists = pkgs.some(p => p.lessons === state.selectedPackage?.lessons && p.price === state.selectedPackage?.price);
     if (!stillExists) state.selectedPackage = null;
@@ -7316,7 +7319,7 @@ async function refreshTeacherStudents() {
                         </div>
                         ${accessRequested ? `
                             <div style="background: #fef3c7; border: 1px solid #f59e0b; color: #92400e; padding: 10px 12px; border-radius: 8px; font-weight: 600; margin-bottom: 12px; font-size: 0.9rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
-                                <span>⚡ Payment Request: <strong>${escapeHtml(requestedPkg)}</strong> ${requestedAmt ? `($${requestedAmt})` : ""}</span>
+                                <span>Payment Request: <strong>${escapeHtml(requestedPkg)}</strong> ${requestedAmt && !String(requestedPkg).includes("$") ? `($${requestedAmt})` : ""}</span>
                                 <span style="display:flex; gap:6px; flex-wrap:wrap;"><button type="button" class="btn btn--primary btn--small" data-quick-credit="${requestedAmt}" data-package-lessons="${requestedLessons}" data-approve-package="true" data-student-id="${escapeHtml(student.id)}" ${requestedAmt > 0 && requestedLessons > 0 ? "" : "disabled"}>Confirm ${requestedLessons} lessons / ${formatMoney(requestedAmt)}</button><button type="button" class="btn btn--outline btn--small" data-student-action="cancel-payment-request" data-student-id="${escapeHtml(student.id)}">Cancel request</button></span>
                             </div>
                         ` : ""}
@@ -8865,6 +8868,10 @@ function wireTeacherActions() {
             const studentId = cancelRequestBtn.dataset.studentId || "";
             const student = state.studentCache.get(studentId) || {};
             withButtonLoading(cancelRequestBtn, "Canceling...", async () => {
+                await window.db.collection("users").doc(studentId).set({ courseAccessRequested: false, paymentStatus: "canceled", paymentNote: "Payment request canceled by teacher.", courseAccessUpdatedAt: Date.now(), updatedAt: window.firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
+                await refreshTeacherStudents();
+                setStatus(els.teacherStudentsMsg, `Payment request canceled for ${student.name || student.email || "student"}.`, "success");
+                return;
                 await saveStudentFinance(studentId, student.balance || 0, validPrice(student.customLessonPrice) || "", {
                     courseAccess: student.courseAccess === true,
                     accessType: student.accessType || "none",
