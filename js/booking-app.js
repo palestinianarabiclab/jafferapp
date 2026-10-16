@@ -1112,8 +1112,8 @@ function updateCourseAccessRequestUi() {
     if (requestBtn) {
         requestBtn.disabled = !signedIn;
         requestBtn.textContent = requested
-            ? "⚡ Request Pending Approval"
-            : "📩 Notify Teacher (Request Credit Addition)";
+            ? "Request Pending Approval (choose another package to replace)"
+            : "Notify Teacher (Request Credit Addition)";
     }
 
     if (msgEl) {
@@ -1164,6 +1164,19 @@ async function requestFullCourseAccess() {
     if (msgEl) {
         setStatus(msgEl, `✅ Notification sent to teacher for ${pkg.label}! Once verified, your account balance will be credited.`, "success");
     }
+}
+
+async function cancelCourseAccessRequest() {
+    if (!isStudentSignedIn()) throw new Error("Sign in first.");
+    await window.db.collection("users").doc(state.currentUser.uid).set({
+        courseAccessRequested: false,
+        paymentStatus: "canceled",
+        paymentNote: "Payment request canceled by student before approval.",
+        courseAccessUpdatedAt: Date.now(),
+        updatedAt: window.firebase.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    updateCourseAccessRequestUi();
+    setStatus(document.getElementById("courseAccessRequestMsg"), "Payment request canceled. You can choose a different package and notify the teacher again.", "success");
 }
 
 async function sendPasswordResetLink({ emailInput, statusElement, button }) {
@@ -7300,7 +7313,7 @@ async function refreshTeacherStudents() {
                         ${accessRequested ? `
                             <div style="background: #fef3c7; border: 1px solid #f59e0b; color: #92400e; padding: 10px 12px; border-radius: 8px; font-weight: 600; margin-bottom: 12px; font-size: 0.9rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
                                 <span>⚡ Payment Request: <strong>${escapeHtml(requestedPkg)}</strong> ${requestedAmt ? `($${requestedAmt})` : ""}</span>
-                                <button type="button" class="btn btn--primary btn--small" data-quick-credit="${requestedAmt}" data-package-lessons="${requestedLessons}" data-approve-package="true" data-student-id="${escapeHtml(student.id)}" ${requestedAmt > 0 && requestedLessons > 0 ? "" : "disabled"}>Confirm ${requestedLessons} lessons / ${formatMoney(requestedAmt)}</button>
+                                <span style="display:flex; gap:6px; flex-wrap:wrap;"><button type="button" class="btn btn--primary btn--small" data-quick-credit="${requestedAmt}" data-package-lessons="${requestedLessons}" data-approve-package="true" data-student-id="${escapeHtml(student.id)}" ${requestedAmt > 0 && requestedLessons > 0 ? "" : "disabled"}>Confirm ${requestedLessons} lessons / ${formatMoney(requestedAmt)}</button><button type="button" class="btn btn--outline btn--small" data-student-action="cancel-payment-request" data-student-id="${escapeHtml(student.id)}">Cancel request</button></span>
                             </div>
                         ` : ""}
 
@@ -8830,6 +8843,29 @@ function wireTeacherActions() {
     });
 
     els.teacherStudentsList?.addEventListener("click", (event) => {
+        const cancelRequestBtn = event.target.closest("[data-student-action='cancel-payment-request']");
+        if (cancelRequestBtn) {
+            const studentId = cancelRequestBtn.dataset.studentId || "";
+            const student = state.studentCache.get(studentId) || {};
+            withButtonLoading(cancelRequestBtn, "Canceling...", async () => {
+                await saveStudentFinance(studentId, student.balance || 0, validPrice(student.customLessonPrice) || "", {
+                    courseAccess: student.courseAccess === true,
+                    accessType: student.accessType || "none",
+                    paymentStatus: "canceled",
+                    paymentNote: "Payment request canceled by teacher before approval.",
+                    courseAccessRequested: false,
+                    lessonCredits: Number(student.lessonCredits || 0),
+                    balanceDelta: 0,
+                    lessonDelta: 0,
+                    totalPaid: Number(student.totalPaid || 0),
+                    operationId: `cancel_payment_request_${studentId}_${Date.now()}`,
+                    adjustmentType: "cancel-payment-request",
+                });
+                await refreshTeacherStudents();
+                setStatus(els.teacherStudentsMsg, `Payment request canceled for ${student.name || student.email || "student"}.`, "success");
+            }).catch((error) => setStatus(els.teacherStudentsMsg, error.message || "Could not cancel payment request.", "error"));
+            return;
+        }
         const viewLessonsBtn = event.target.closest("[data-student-action='view-lessons']");
         if (viewLessonsBtn) {
             const studentId = viewLessonsBtn.dataset.studentId;

@@ -119,6 +119,7 @@ service cloud.firestore {
           'requestedLessons',
           'paymentStatus',
           'paymentNote',
+          'courseAccessUpdatedAt',
           'reviewRequested',
           'reviewSubmittedAt',
           'updatedAt'
