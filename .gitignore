@@ -1,4 +1,14 @@
 node_modules/
 .env
+.env.*
+!.env.example
 dist/
 .vercel/
+.firebase/
+firebase-debug.log
+*.log
+*.local
+service-account*.json
+serviceAccount*.json
+credentials*.json
+*-credentials.json
