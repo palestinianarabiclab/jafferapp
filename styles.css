@@ -977,6 +977,7 @@ main.site-shell {
 .student-package-modal__row label { display:grid; gap:5px; font-size:.78rem; font-weight:700; color:var(--muted); }
 .student-package-modal__row input { min-width:0; }
 .student-package-modal__actions { display:flex; justify-content:space-between; gap:10px; margin-top:16px; }
+.student-package-modal.modal--open { display: grid; place-items: center; }
 @media (max-width:700px) { .student-package-modal__row { grid-template-columns:1fr 1fr; } .student-package-modal__actions { flex-direction:column; } }
 .student-admin-item .student-finance-card { min-width: 0; }
 .student-admin-item [data-student-package-lessons], .student-admin-item [data-student-package-price] { display: inline-block; width: calc(50% - 4px); }
