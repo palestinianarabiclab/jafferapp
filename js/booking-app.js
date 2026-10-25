@@ -1612,9 +1612,15 @@ function updateStudentOfferUi() {
         }
     }
 
-    const assigned = state.studentProfile?.assignedPackages?.[0] || state.studentProfile?.assignedPackage;
-    const pkgs = assigned && Number(assigned.lessons) > 0 && Number(assigned.price) > 0
-        ? [{ ...assigned, label: assigned.label || assigned.badge || `${assigned.lessons} Lessons ($${assigned.price})`, badge: assigned.badge || assigned.label || "" }]
+    const studentPackages = Array.isArray(state.studentProfile?.assignedPackages) && state.studentProfile.assignedPackages.length
+        ? state.studentProfile.assignedPackages
+        : (state.studentProfile?.assignedPackage ? [state.studentProfile.assignedPackage] : []);
+    const pkgs = studentPackages.length
+        ? studentPackages.filter((pkg) => Number(pkg?.lessons) > 0 && Number(pkg?.price) > 0).map((pkg) => ({
+            ...pkg,
+            label: pkg.label || pkg.badge || `${pkg.lessons} Lessons ($${pkg.price})`,
+            badge: pkg.badge || pkg.label || "",
+        }))
         : (Array.isArray(offers.packages) ? offers.packages : []);
     const stillExists = pkgs.some(p => p.lessons === state.selectedPackage?.lessons && p.price === state.selectedPackage?.price);
     if (!stillExists) state.selectedPackage = null;
