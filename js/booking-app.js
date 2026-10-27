@@ -774,7 +774,7 @@ function formatMoney(value) {
 
 function getConfiguredLessonPrice() {
     const match = String(state.profileSettings?.rateText || "").replace(/,/g, "").match(/\d+(?:\.\d+)?/);
-    return match ? toMoneyValue(match[0]) : 0;
+    return validPrice(match?.[0]) || validPrice(state.bookingSettings?.sitePrice) || 0;
 }
 
 function getStudentTotalLessonCredits(profile = state.studentProfile || {}) {
@@ -1265,6 +1265,7 @@ function updateStudentAuthUi() {
     updateStudentBalanceUi();
     updateCourseAccessRequestUi();
     updateBookingSubmitState();
+    updateStudentOfferUi();
 }
 
 function stopStudentProfileListener() {
@@ -1596,10 +1597,21 @@ async function loadPublicSettings({ force = false } = {}) {
     }
 }
 
+function startPublicProfileListener() {
+    if (!window.db || typeof state.publicProfileUnsubscribe === "function") return;
+    state.publicProfileUnsubscribe = window.db.collection("teacherProfile").doc("primary").onSnapshot((snap) => {
+        if (!snap.exists) return;
+        state.profileSettings = { ...createInitialProfileSettings(), ...(snap.data() || {}) };
+        renderProfileUi();
+        updateStudentOfferUi();
+    }, (error) => console.warn("Could not live-update the public lesson rate.", error));
+}
+
 function updateStudentOfferUi() {
     const offers = state.bookingSettings.courseOffers || {};
     const lessonPrice = getConfiguredLessonPrice();
     const studentLessonPrice = isStudentSignedIn() ? validPrice(state.studentProfile?.lessonUnitPrice) : 0;
+    const effectiveLessonPrice = studentLessonPrice || lessonPrice;
     const configuredRateText = String(state.profileSettings?.rateText || "").trim();
     const rateText = studentLessonPrice
         ? `Your rate: ${formatMoney(studentLessonPrice)} / lesson`
@@ -1631,9 +1643,14 @@ function updateStudentOfferUi() {
             badge: pkg.badge || pkg.label || "",
         }))
         : (Array.isArray(offers.packages) ? offers.packages : []);
-    if (!studentPackages.length && studentLessonPrice > 0 && lessonPrice > 0) {
-        pkgs = pkgs.map((pkg) => ({ ...pkg, price: Math.round((Number(pkg.price || 0) / lessonPrice) * studentLessonPrice * 100) / 100 }));
-    }
+    pkgs = pkgs.map((pkg) => {
+        const lessons = Math.max(1, Math.floor(Number(pkg?.lessons || 1)));
+        if (lessons === 1 && effectiveLessonPrice > 0) return { ...pkg, price: effectiveLessonPrice };
+        if (!studentPackages.length && studentLessonPrice > 0 && lessonPrice > 0) {
+            return { ...pkg, price: Math.round((Number(pkg.price || 0) / lessonPrice) * studentLessonPrice * 100) / 100 };
+        }
+        return pkg;
+    });
     const stillExists = pkgs.some(p => p.lessons === state.selectedPackage?.lessons && p.price === state.selectedPackage?.price);
     if (!stillExists) state.selectedPackage = null;
 
@@ -8879,13 +8896,14 @@ function wireTeacherActions() {
 
     function openStudentPackageEditor(studentId) {
         const student = state.studentCache.get(studentId) || {};
-        const publicPackages = Array.isArray(state.bookingSettings?.courseOffers?.packages) ? state.bookingSettings.courseOffers.packages : [];
-        const packages = Array.isArray(student.assignedPackages) && student.assignedPackages.length ? student.assignedPackages : (student.assignedPackage ? [student.assignedPackage] : publicPackages);
+        const livePriceInput = document.querySelector(`.student-admin-item[data-student-id="${CSS.escape(studentId)}"] [data-student-price]`);
+        const effectivePrice = validPrice(livePriceInput?.value) || validPrice(student.lessonUnitPrice) || validPrice(student.customLessonPrice) || getConfiguredLessonPrice();
+        const packages = Array.isArray(student.assignedPackages) && student.assignedPackages.length ? student.assignedPackages : (student.assignedPackage ? [student.assignedPackage] : [{ label: "Private Package", lessons: 1, price: effectivePrice || 1, popular: false }]);
         const modal = document.createElement("div"); modal.className = "student-package-modal modal--open";
         modal.innerHTML = `<div class="student-package-modal__dialog"><button type="button" class="student-package-modal__close">×</button><h3>Edit Lesson Packages</h3><p class="small-note">These packages are visible only to ${escapeHtml(student.name || student.email || "this student")}.</p><div class="student-package-modal__rows">${packages.map(pkg => `<div class="student-package-modal__row"><label>Badge / Discount Label<input data-pkg-label value="${escapeHtml(pkg.label || "")}"></label><label>Lessons<input data-pkg-lessons type="number" min="1" value="${escapeHtml(pkg.lessons || 1)}"></label><label>Price (USD)<input data-pkg-price type="number" min="0.01" step="0.01" value="${escapeHtml(pkg.price || 0)}"></label><label>Popular<input data-pkg-popular type="checkbox" ${pkg.popular ? "checked" : ""}></label><button type="button" class="btn btn--danger btn--small" data-pkg-delete>Delete</button></div>`).join("")}</div><div class="student-package-modal__actions"><button type="button" class="btn btn--outline" data-pkg-add>➕ Add New Package</button><button type="button" class="btn btn--primary" data-pkg-save>Save Package</button></div></div>`;
         document.body.appendChild(modal); const rows = modal.querySelector(".student-package-modal__rows");
-        const addRow = () => { const row = document.createElement("div"); row.className = "student-package-modal__row"; row.innerHTML = `<label>Badge / Discount Label<input data-pkg-label></label><label>Lessons<input data-pkg-lessons type="number" min="1" value="1"></label><label>Price (USD)<input data-pkg-price type="number" min="0.01" step="0.01"></label><label>Popular<input data-pkg-popular type="checkbox"></label><button type="button" class="btn btn--danger btn--small" data-pkg-delete>Delete</button>`; rows.appendChild(row); };
-        modal.addEventListener("click", async event => { if (event.target.closest(".student-package-modal__close")) modal.remove(); if (event.target.closest("[data-pkg-add]")) addRow(); if (event.target.closest("[data-pkg-delete]")) event.target.closest(".student-package-modal__row")?.remove(); if (event.target.closest("[data-pkg-save]")) { const assignedPackages = [...rows.querySelectorAll(".student-package-modal__row")].map(row => ({ label: row.querySelector("[data-pkg-label]")?.value.trim() || "Lesson Package", lessons: Math.max(1, Number(row.querySelector("[data-pkg-lessons]")?.value || 1)), price: Math.max(0.01, Number(row.querySelector("[data-pkg-price]")?.value || 0)), popular: row.querySelector("[data-pkg-popular]")?.checked === true })).filter(pkg => pkg.price > 0); if (!assignedPackages.length) return; await window.db.collection("users").doc(studentId).set({ assignedPackages, assignedPackage: assignedPackages[0], updatedAt: window.firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }); modal.remove(); await refreshTeacherStudents(); } });
+        const addRow = () => { const row = document.createElement("div"); row.className = "student-package-modal__row"; row.innerHTML = `<label>Badge / Discount Label<input data-pkg-label></label><label>Lessons<input data-pkg-lessons type="number" min="1" value="1"></label><label>Price (USD)<input data-pkg-price type="number" min="0.01" step="0.01" value="${escapeHtml(effectivePrice || "")}"></label><label>Popular<input data-pkg-popular type="checkbox"></label><button type="button" class="btn btn--danger btn--small" data-pkg-delete>Delete</button>`; rows.appendChild(row); };
+        modal.addEventListener("click", async event => { if (event.target.closest(".student-package-modal__close")) modal.remove(); if (event.target.closest("[data-pkg-add]")) addRow(); if (event.target.closest("[data-pkg-delete]")) event.target.closest(".student-package-modal__row")?.remove(); if (event.target.closest("[data-pkg-save]")) { const assignedPackages = [...rows.querySelectorAll(".student-package-modal__row")].map(row => ({ label: row.querySelector("[data-pkg-label]")?.value.trim() || "Lesson Package", lessons: Math.max(1, Number(row.querySelector("[data-pkg-lessons]")?.value || 1)), price: Math.max(0.01, Number(row.querySelector("[data-pkg-price]")?.value || 0)), popular: row.querySelector("[data-pkg-popular]")?.checked === true })).filter(pkg => pkg.price > 0); if (!assignedPackages.length) { window.alert("Add at least one package before saving."); return; } try { await window.db.collection("users").doc(studentId).set({ assignedPackages, assignedPackage: assignedPackages[0], updatedAt: window.firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }); modal.remove(); await refreshTeacherStudents(); } catch (error) { console.error("Could not save private packages.", error); window.alert("Could not save packages. Publish the Firestore rules, then try again."); } } });
     }
     els.teacherStudentsList?.addEventListener("click", (event) => {
         const editPackageBtn = event.target.closest("[data-student-action='edit-package']"); if (editPackageBtn) { openStudentPackageEditor(editPackageBtn.dataset.studentId); return; }
@@ -9612,6 +9630,7 @@ async function init() {
         return;
     }
 
+    startPublicProfileListener();
     loadPublicSettings({ force: true }).catch((error) => {
         console.warn("Could not load public lesson packages.", error);
         updateStudentOfferUi();
