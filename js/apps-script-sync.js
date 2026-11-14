@@ -111,10 +111,15 @@ async function callAppsScript(action, payload = {}, { allowGet = false } = {}) {
         );
         return parseAppsScriptResponse(res);
     } catch (err) {
-        const message = err?.name === "AbortError" || err?.name === "TimeoutError"
+        const isTimeout = err?.name === "AbortError" || err?.name === "TimeoutError";
+        const rawMsg = err?.message || String(err);
+        const isCorsOrNetwork = /failed to fetch|networkerror|load failed/i.test(rawMsg);
+        const message = isTimeout
             ? "Apps Script request timed out. Please try again."
-            : (err?.message || String(err));
-        return { success: false, aborted: err?.name === "AbortError" || err?.name === "TimeoutError", message };
+            : isCorsOrNetwork
+                ? "Apps Script blocked the connection (CORS / Authorization). In Google Apps Script, run authorizeAppsScript() to approve permissions, then Deploy > Manage deployments > Edit > New version with 'Who has access: Anyone'."
+                : rawMsg;
+        return { success: false, aborted: isTimeout, corsBlocked: isCorsOrNetwork, message };
     }
 }
 
@@ -184,8 +189,8 @@ async function sendReviewRequestViaAppsScript({ studentId, siteUrl } = {}) {
     return callAppsScript("sendReviewRequest", { studentId, siteUrl });
 }
 
-async function notifyNewStudentSignupViaAppsScript({ studentId } = {}) {
-    return callAppsScript("notifyNewStudentSignup", { studentId });
+async function notifyNewStudentSignupViaAppsScript({ studentId, name = "", email = "", phone = "" } = {}) {
+    return callAppsScript("notifyNewStudentSignup", { studentId, name, email, phone });
 }
 
 async function sendStudentBookingInvitationViaAppsScript({ studentId, template = "book-more" } = {}) {

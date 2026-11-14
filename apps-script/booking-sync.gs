@@ -1,3 +1,16 @@
+function authorizeAppsScript() {
+  const config = getConfig_();
+  const cal = CalendarApp.getCalendarById(config.primaryCalendarId);
+  const quota = MailApp.getRemainingDailyQuota();
+  const token = ScriptApp.getOAuthToken();
+  Logger.log('Authorized successfully. Calendar: ' + (cal ? cal.getName() : 'none') + ', Email quota: ' + quota + ', Token length: ' + (token ? token.length : 0));
+  return {
+    authorized: true,
+    calendarFound: !!cal,
+    emailQuotaRemaining: quota,
+  };
+}
+
 function jsonOut(obj) {
   return ContentService
     .createTextOutput(JSON.stringify(obj))
@@ -2012,16 +2025,21 @@ function handleRequest_(e) {
         return jsonOut({ success: false, message: 'Student account mismatch.' });
       }
       enforceCallerRateLimit_(caller, 'notifyNewStudentSignup', 10, 3600);
-      const studentDoc = firestoreFetch_(config, caller.token, '/users/' + encodeURIComponent(studentId), { method: 'get' });
-      if ((fsString_(studentDoc, 'role') || 'student') !== 'student') {
+      let studentDoc = null;
+      try {
+        studentDoc = firestoreFetch_(config, caller.token, '/users/' + encodeURIComponent(studentId), { method: 'get' });
+      } catch (callerReadErr) {
+        studentDoc = null;
+      }
+      if (studentDoc && (fsString_(studentDoc, 'role') || 'student') !== 'student') {
         return jsonOut({ success: false, message: 'Only a student account can send this notification.' });
       }
-      if (fsNumber_(studentDoc, 'teacherSignupNotificationSentAt')) {
+      if (studentDoc && fsNumber_(studentDoc, 'teacherSignupNotificationSentAt')) {
         return jsonOut({ success: true, alreadySent: true, message: 'Teacher was already notified.' });
       }
-      const email = fsString_(studentDoc, 'email') || caller.email;
-      const name = fsString_(studentDoc, 'name') || 'Student';
-      const phone = fsString_(studentDoc, 'phone');
+      const email = (studentDoc && fsString_(studentDoc, 'email')) || caller.email || String(req.email || '').trim();
+      const name = (studentDoc && fsString_(studentDoc, 'name')) || String(req.name || '').trim() || 'Student';
+      const phone = (studentDoc && fsString_(studentDoc, 'phone')) || String(req.phone || '').trim();
       const teacherEmail = normalizeEmail_(config.notificationEmail || config.firebaseTeacherEmail);
       if (!isValidEmail_(teacherEmail)) return jsonOut({ success: false, message: 'Teacher notification email is not configured.' });
       const sent = sendNewStudentSignupEmail_(teacherEmail, {
@@ -2029,7 +2047,13 @@ function handleRequest_(e) {
         teacherName: config.teacherName,
         dashboardUrl: config.siteUrl + (config.siteUrl.indexOf('?') === -1 ? '?teacher=1' : '&teacher=1')
       });
-      if (sent) firestoreIamPatch_(config, 'users', studentId, { teacherSignupNotificationSentAt: Date.now(), updatedAt: Date.now() });
+      if (sent) {
+        try {
+          firestoreIamPatch_(config, 'users', studentId, { teacherSignupNotificationSentAt: Date.now(), updatedAt: Date.now() });
+        } catch (patchErr) {
+          // Do not fail the response if the email was already sent.
+        }
+      }
       return jsonOut({ success: sent, message: sent ? 'Teacher notified about the new account.' : 'Teacher notification was not sent.' });
     }
 

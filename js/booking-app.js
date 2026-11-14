@@ -350,6 +350,7 @@ function cacheDom() {
         "teacherProfileVideoUrlInput",
         "teacherProfileHoursInput",
         "teacherProfileStudentsInput",
+        "teacherProfileStudentsAutoToggle",
         "teacherProfileQuoteInput",
         "teacherProfileBioInput",
         "saveTeacherProfileBtn",
@@ -1275,6 +1276,32 @@ function stopStudentProfileListener() {
     state.studentProfileUnsubscribe = null;
 }
 
+let signupNotificationAttemptedUid = "";
+
+function maybeNotifyPendingStudentSignup(uid, userData = {}) {
+    if (!uid || signupNotificationAttemptedUid === uid) return;
+    if ((userData.role || "student") !== "student") return;
+    if (Number(userData.teacherSignupNotificationSentAt || 0) > 0) return;
+    const rawCreatedAt = userData.createdAt;
+    const createdAtMs = typeof rawCreatedAt?.toMillis === "function"
+        ? rawCreatedAt.toMillis()
+        : Number(rawCreatedAt || 0);
+    if (!createdAtMs || (Date.now() - createdAtMs) > 24 * 60 * 60 * 1000) return;
+    signupNotificationAttemptedUid = uid;
+    window.notifyNewStudentSignupViaAppsScript?.({
+        studentId: uid,
+        name: String(userData.name || "").trim(),
+        email: String(userData.email || state.currentUser?.email || "").trim(),
+        phone: String(userData.phone || "").trim(),
+    }).then((result) => {
+        if (result && result.success === false) {
+            console.warn("Teacher signup notification retry was not sent:", result.message);
+        }
+    }).catch((error) => {
+        console.warn("Teacher signup notification retry failed:", error);
+    });
+}
+
 function startStudentProfileListener() {
     stopStudentProfileListener();
     if (!window.db || !state.currentUser || state.currentRole !== "student") return;
@@ -1284,6 +1311,7 @@ function startStudentProfileListener() {
         .onSnapshot((snap) => {
             if (!snap.exists) return;
             state.studentProfile = snap.data() || {};
+            maybeNotifyPendingStudentSignup(state.currentUser?.uid, state.studentProfile);
             updateStudentAuthUi();
         }, (error) => {
             console.warn("Could not watch student profile.", error);
@@ -4430,7 +4458,11 @@ function wireStudentActions() {
                 }
                 // The account is already complete at this point. Email delivery
                 // is best-effort and must never roll back or block sign-up.
-                window.notifyNewStudentSignupViaAppsScript?.({ studentId: cred.user.uid })
+                signupNotificationAttemptedUid = cred.user.uid;
+                await Promise.race([
+                    new Promise((resolve) => window.setTimeout(resolve, 4000)),
+                    window.notifyNewStudentSignupViaAppsScript?.({ studentId: cred.user.uid, name, email, phone })
+                ])
                     .then((result) => {
                         if (result && result.success === false) console.warn("Teacher signup notification was not sent:", result.message);
                     })
@@ -5908,11 +5940,15 @@ function updateTeacherOverviewStats() {
         : (Array.isArray(state.bookingCache) ? state.bookingCache : []);
 
     const now = Date.now();
+    const manualStudentCount = state.profileSettings?.studentsCountManual === true
+        ? String(state.profileSettings?.studentsCount || "").trim()
+        : "";
+    const displayedStudentCount = manualStudentCount || getActiveStudentCount().toLocaleString();
 
     // Active students combines current accounts with unique taught students
     // retained by the existing Preply/platform synchronization history.
     if (activeStudentsEl) {
-        activeStudentsEl.textContent = getActiveStudentCount().toLocaleString();
+        activeStudentsEl.textContent = displayedStudentCount;
     }
 
     // 2. Calculate Upcoming Bookings
@@ -5960,9 +5996,7 @@ function updateTeacherOverviewStats() {
         headTotalBalanceEl.textContent = formattedTotalBalance;
     }
     if (headTotalStudentsEl) {
-        const manualCount = state.profileSettings?.studentsCountManual === true
-            ? String(state.profileSettings?.studentsCount || "").trim() : "";
-        headTotalStudentsEl.textContent = manualCount || String(studentList.length || 0);
+        headTotalStudentsEl.textContent = manualStudentCount || String(studentList.length || 0);
     }
 
     renderTeacherUpcomingLessonBanner();
@@ -6781,7 +6815,15 @@ function renderProfileUi() {
     if (els.teacherProfileAvatarUrlInput) els.teacherProfileAvatarUrlInput.value = p.avatarUrl || "";
     if (els.teacherProfileVideoUrlInput) els.teacherProfileVideoUrlInput.value = p.videoUrl || "";
     if (els.teacherProfileHoursInput) els.teacherProfileHoursInput.value = p.hoursTaught || "";
-    if (els.teacherProfileStudentsInput) els.teacherProfileStudentsInput.value = p.studentsCount || "";
+    const isManualStudents = p.studentsCountManual === true;
+    if (els.teacherProfileStudentsAutoToggle) {
+        els.teacherProfileStudentsAutoToggle.checked = !isManualStudents;
+    }
+    if (els.teacherProfileStudentsInput) {
+        const autoCount = p.activeStudentsCount ?? (Array.isArray(state.studentsCache) && state.studentsCache.length ? String(getActiveStudentCount()) : (p.studentsCount || ""));
+        els.teacherProfileStudentsInput.value = isManualStudents ? (p.studentsCount || "") : String(autoCount);
+        els.teacherProfileStudentsInput.disabled = !isManualStudents;
+    }
     if (els.teacherProfileQuoteInput) els.teacherProfileQuoteInput.value = p.quoteArabic || "";
     if (els.teacherProfileBioInput) els.teacherProfileBioInput.value = p.bioText || "";
     updateStudentOfferUi();
@@ -7215,6 +7257,31 @@ function confirmStudentCancellation(booking) {
     });
 }
 
+function getStudentRegisteredAtMs(student = {}) {
+    const raw = student?.registeredAt ?? student?.createdAt;
+    if (!raw) return 0;
+    if (typeof raw?.toMillis === "function") return raw.toMillis();
+    if (typeof raw?.toDate === "function") return raw.toDate().getTime();
+    if (typeof raw === "object" && Number.isFinite(Number(raw.seconds))) {
+        return Number(raw.seconds) * 1000;
+    }
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+        return raw < 1e11 ? raw * 1000 : raw;
+    }
+    const parsed = Date.parse(String(raw));
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatStudentRegistrationDate(student = {}, { includeTime = false } = {}) {
+    const ms = getStudentRegisteredAtMs(student);
+    if (!ms) return "Date not recorded";
+    const date = new Date(ms);
+    if (Number.isNaN(date.getTime())) return "Date not recorded";
+    return date.toLocaleString("en-US", includeTime
+        ? { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }
+        : { year: "numeric", month: "short", day: "numeric" });
+}
+
 async function refreshTeacherStudents() {
     if (!els.teacherStudentsList) return;
     els.teacherStudentsList.innerHTML = "<div class=\"small-note\">Loading students...</div>";
@@ -7289,6 +7356,7 @@ async function refreshTeacherStudents() {
                 ...accounting,
                 lessonCredits: storedLessonCredits,
                 displayLessonCredits: Math.max(0, storedLessonCredits - pendingLateCancellations),
+                registeredAt: profile.createdAt ?? accounting.createdAt ?? null,
                 reservedLessons: Number(reservedByStudent.get(doc.id) || 0),
             });
         });
@@ -7301,7 +7369,11 @@ async function refreshTeacherStudents() {
                 updatedAt: Date.now(),
             }, { merge: true });
         }
-        students.sort((a, b) => String(a.name || a.email || "").localeCompare(String(b.name || b.email || "")));
+        students.sort((a, b) => {
+            const timeDiff = getStudentRegisteredAtMs(b) - getStudentRegisteredAtMs(a);
+            if (timeDiff !== 0) return timeDiff;
+            return String(a.name || a.email || "").localeCompare(String(b.name || b.email || ""));
+        });
         state.studentsCache = students;
         await syncPublicStudentCounts(students).catch((error) => console.warn("Could not update the public student counts.", error));
         updateTeacherOverviewStats();
@@ -7333,13 +7405,18 @@ async function refreshTeacherStudents() {
                     ? "Review requested"
                     : "Review not requested";
             const trialUsed = student.trialUsed === true;
+            const registeredFull = formatStudentRegistrationDate(student, { includeTime: true });
 
             return `
                 <div class="student-admin-item" data-student-id="${escapeHtml(student.id)}">
                     <button class="student-admin-item__summary" type="button" data-student-action="toggle">
                         <span class="student-admin-item__identity">
                             <span class="student-admin-item__avatar">${escapeHtml(String(student.name || student.email || "S").slice(0, 1).toUpperCase())}</span>
-                            <span><strong>${escapeHtml(student.name || "Student")}</strong><span>${escapeHtml(student.email || "")}</span></span>
+                            <span>
+                                <strong>${escapeHtml(student.name || "Student")}</strong>
+                                <span>${escapeHtml(student.email || "")}</span>
+                                <span class="student-admin-item__joined">📅 Joined: ${escapeHtml(registeredFull)}</span>
+                            </span>
                         </span>
                         <span class="student-admin-metrics">
                             <span class="student-admin-metric"><small>Available</small><strong>${availableLessons}</strong></span>
@@ -7351,7 +7428,7 @@ async function refreshTeacherStudents() {
                     </button>
                     <form class="student-admin-editor" data-student-editor hidden>
                         <div class="student-admin-editor__head">
-                            <div><strong>Student account</strong><span>${escapeHtml(student.phone || "No phone number")}</span></div>
+                            <div><strong>Student account</strong><span>${escapeHtml(student.phone || "No phone number")} · 📅 Registered: ${escapeHtml(registeredFull)}</span></div>
                             <div class="student-admin-editor__actions">
                                 <button class="btn btn--outline btn--small" type="button" data-student-action="send-booking-invitation" data-student-id="${escapeHtml(student.id)}">Send Lesson Invitation</button>
                                 <button class="btn btn--outline btn--small" type="button" data-student-action="view-lessons" data-student-id="${escapeHtml(student.id)}">View Lessons & deductions</button>
@@ -8170,10 +8247,28 @@ function wireTeacherActions() {
         await withButtonLoading(els.teacherLogoutBtn, "Signing out...", () => window.auth.signOut());
     });
 
+    els.teacherProfileStudentsAutoToggle?.addEventListener("change", () => {
+        const auto = els.teacherProfileStudentsAutoToggle.checked;
+        if (els.teacherProfileStudentsInput) {
+            els.teacherProfileStudentsInput.disabled = auto;
+            if (auto) {
+                els.teacherProfileStudentsInput.value = String(getActiveStudentCount());
+            } else {
+                els.teacherProfileStudentsInput.focus();
+            }
+        }
+    });
+
     els.teacherProfileForm?.addEventListener("submit", async (event) => {
         event.preventDefault();
         try {
             await withButtonLoading(els.saveTeacherProfileBtn, "Saving...", async () => {
+                const manualInput = (els.teacherProfileStudentsInput?.value || "").trim();
+                const useAutoStudents = els.teacherProfileStudentsAutoToggle
+                    ? els.teacherProfileStudentsAutoToggle.checked || !manualInput
+                    : !manualInput;
+                const autoActiveCount = String(getActiveStudentCount());
+                const autoRegisteredCount = String(Array.isArray(state.studentsCache) ? state.studentsCache.length : 0);
                 const updated = {
                     ...state.profileSettings,
                     name: (els.teacherProfileNameInput?.value || "").trim() || "Jaffer",
@@ -8182,8 +8277,10 @@ function wireTeacherActions() {
                     avatarUrl: (els.teacherProfileAvatarUrlInput?.value || "").trim(),
                     videoUrl: (els.teacherProfileVideoUrlInput?.value || "").trim(),
                     hoursTaught: (els.teacherProfileHoursInput?.value || "").trim() || "1,200+",
-                    studentsCount: (els.teacherProfileStudentsInput?.value || "").trim() || state.profileSettings?.studentsCount || "85+",
-                    studentsCountManual: true,
+                    studentsCount: useAutoStudents ? autoActiveCount : manualInput,
+                    studentsCountManual: !useAutoStudents,
+                    activeStudentsCount: autoActiveCount,
+                    registeredStudentsCount: autoRegisteredCount,
                     quoteArabic: (els.teacherProfileQuoteInput?.value || "").trim(),
                     bioText: (els.teacherProfileBioInput?.value || "").trim(),
                 };
