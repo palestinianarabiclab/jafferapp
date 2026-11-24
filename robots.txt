@@ -7,4 +7,13 @@ Allow: /
 User-agent: GPTBot
 Allow: /
 
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
 Sitemap: https://jafferbooking.vercel.app/sitemap.xml

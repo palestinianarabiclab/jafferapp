@@ -1,14 +1,17 @@
 # Jaffer — Palestinian Arabic Teacher
 
-Jaffer teaches spoken Palestinian and Levantine Arabic through private online lessons.
+Jaffer is a certified native Palestinian Arabic and Levantine dialect tutor offering private 1-on-1 online lessons focused on real-life speaking and conversation.
 
-Official profile and booking page:
-https://jafferbooking.vercel.app/
+## Official Website & Booking
+- Booking & Teacher Profile: https://jafferbooking.vercel.app/
 
-Main topics:
-- Palestinian Arabic for beginners
-- Levantine Arabic conversation
-- Practical speaking and pronunciation
-- Arabic for family, travel, and daily communication
+## What Students Learn
+- Spoken Palestinian Arabic for beginners, intermediate, and advanced learners
+- Levantine Arabic daily conversation and listening comprehension
+- Practical pronunciation and natural expressions
+- Arabic for family, travel, work, and everyday communication
 
-Student reviews shown on the official page are submitted by registered students after the teacher requests feedback.
+## Lesson Format
+- Private 1-on-1 online lessons (Google Meet)
+- Flexible scheduling with automatic timezone conversion
+- Verified student reviews submitted by registered students
