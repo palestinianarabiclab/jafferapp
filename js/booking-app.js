@@ -6930,8 +6930,10 @@ function renderReviewsUi() {
                 const avatarText = escapeHtml(r.avatar || (r.name ? r.name.substring(0, 2).toUpperCase() : "ST"));
                 return `
                     <div class="review-item" id="review-${escapeHtml(r.id)}" itemscope itemtype="https://schema.org/Review">
-                        <span itemprop="itemReviewed" itemscope itemtype="https://schema.org/Person" hidden>
-                            <meta itemprop="name" content="Jaffer" />
+                        <span itemprop="itemReviewed" itemscope itemtype="https://schema.org/Course" hidden>
+                            <meta itemprop="description" content="One-on-one online Palestinian and Levantine Arabic conversation lessons." />
+                            <span itemprop="provider" itemscope itemtype="https://schema.org/Person"><meta itemprop="name" content="Jaffer" /></span>
+                            <meta itemprop="name" content="Private Online Palestinian Arabic Lessons with Jaffer" />
                         </span>
                         <div class="review-top">
                             <div class="reviewer-info" itemprop="author" itemscope itemtype="https://schema.org/Person">
