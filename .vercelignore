@@ -1,0 +1,11 @@
+apps-script/
+tests/
+firestore.rules
+firestore.indexes.json
+firebase.json
+.firebaserc
+firebase-blueprint.json
+server.js
+.agents/
+.vscode/
+README.md

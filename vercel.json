@@ -3,7 +3,7 @@
     "outputDirectory": ".",
     "rewrites": [
         {
-            "source": "/((?!assets/|js/|styles.css|favicon.ico).*)",
+            "source": "/((?!assets/|js/|styles.css|favicon.ico|robots.txt|sitemap.xml|llms.txt|metadata.json).*)",
             "destination": "/index.html"
         }
     ],
@@ -16,8 +16,25 @@
                     "value": "nosniff"
                 },
                 {
+                    "key": "X-Frame-Options",
+                    "value": "DENY"
+                },
+                {
                     "key": "Referrer-Policy",
                     "value": "strict-origin-when-cross-origin"
+                },
+                {
+                    "key": "Permissions-Policy",
+                    "value": "camera=(), microphone=(), geolocation=()"
+                }
+            ]
+        },
+        {
+            "source": "/index.html",
+            "headers": [
+                {
+                    "key": "Cache-Control",
+                    "value": "no-store"
                 }
             ]
         }
